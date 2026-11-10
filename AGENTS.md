@@ -15,9 +15,11 @@ d'arrière-plan, par lectures HTTP byte-ranges uniquement.
 - Licence **GPL v2+** (comme JOSM) ; ne pas ajouter de fichiers sous licence
   incompatible. Pas d'en-tête de licence par fichier (un `LICENSE` racine
   suffit, suivre l'existant).
-- V1 n'accepte que **EPSG:3857 et EPSG:4326** ; tout autre CRS doit produire
-  une erreur explicite (pas de reprojection silencieuse). La reprojection
-  (Lambert-93, UTM…) est la phase 2 du plan.
+- V1 n'accepte que **EPSG:3857 et EPSG:4326**. Depuis la phase 2, la
+  reprojection par tuile est active pour les CRS listés dans `crs/Crs`
+  (4326, 3857, UTM WGS84 32601-32660 / 32701-32760, Lambert-93 2154) ;
+  tout autre CRS doit produire une erreur explicite (pas de reprojection
+  silencieuse ni de supposition de SRID).
 
 ## Langue et style
 
@@ -65,6 +67,13 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
   source TMS sans URL (synthèse à la volée) qui **porte le `CogReader`** ;
   `CogTileLoaderJob` récupère le lecteur via `tile.getSource()`.
 - `AddCogLayerAction` : dialogue URL + ouverture + zoom vers l'emprise.
+- `crs/` : projections maison (Snyder / USGS PP 1312, précision sub-mm en
+  avant, validée contre GDAL/PROJ dans `ProjectionTest`). Interface
+  `Projection` (project/unproject), registre/cache `Crs.forEpsg`.
+  `CogComposer.composeWarp` : grille de controle 9x9 projetee exactement
+  (3857 -> lat/lon -> coordonnees modeles), interpolation bilineaire par
+  pixel de sortie, echantillonnage bilineaire ARGB conscient de l'alpha.
+  Les voies lineaires 3857/4326 de `compose` sont conservees (non-regression).
 - `tools/CogFileServer` : tests uniquement (ne pas lier au plugin).
 
 ## Pièges TIFF/COG (tous déjà rencontrés — ne pas régresser)
@@ -107,16 +116,37 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
 - Journalisation du cycle de vie du plugin : `mapFrameInitialized` peut
   manquer la fenêtre déjà ouverte → ajout de l'action au menu avec retry.
 
+## Pièges reprojection (phase 2, déjà rencontrés)
+
+- `LambertConformalConic2SP` : le parametre `lat0` du constructeur masque le
+  champ radians `this.lat0` ; utiliser `t(this.lat0)` pour `rho0` (sinon NaN).
+- Convention GeoTIFF : le pixel k couvre [k, k+1[ et son CENTRE vaut k+0.5
+  (`col = (x - originX) / scaleX`, echantillonner en `col - 0.5`). Un motif
+  de test bilineaire centre sur les entiers fait un decalage systematique
+  d'un demi-pixel.
+- Ligne 0 d'une image Java = Nord = `bbox.maxY` : la grille de controle du
+  warp doit demarrer a `maxY` (sinon sortie retournee verticalement ; un
+  test qui reproduit la meme convention d'erreur ne la detecte pas).
+- References GDAL en Python : `srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)`
+  (methode `SetAxisMappingStrategy`, pas `SetAxisMapping`) pour obtenir
+  l'ordre lon/lat, sinon les transformees sont fausses.
+- Series de Snyder 6e ordre : ~3 mm d'erreur a 5 degres du meridien central
+  (tolerances de test elargies pour les cas hors fuseau UTM).
+
 ## Exemple COG de référence
 
-`cog-paris-3857.tif` (racine, 1,4 Mo, EPSG:3857 validé bout en bout).
-Régénération :
+`cog-paris-3857.tif` (racine, 1,4 Mo, EPSG:3857) et `cog-paris-l93.tif`
+(750 ko, EPSG:2154, même scène). Régénération :
 
 ```sh
 gdalwarp -t_srs EPSG:3857 -te_srs EPSG:4326 -te 2.25 48.80 2.45 48.92 \
   -tr 10 10 -r bilinear -of COG -co COMPRESS=JPEG -co QUALITY=85 \
   "/vsicurl/https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/DQ/2020/6/S2A_31UDQ_20200629_1_L2A/TCI.tif" \
   cog-paris-3857.tif
+gdalwarp -t_srs EPSG:2154 -te_srs EPSG:4326 -te 2.25 48.80 2.45 48.92 \
+  -tr 10 10 -r bilinear -of COG -co COMPRESS=JPEG -co QUALITY=85 \
+  "/vsicurl/https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/DQ/2020/6/S2A_31UDQ_20200629_1_L2A/TCI.tif" \
+  cog-paris-l93.tif
 ```
 
 C'est le seul format COG « réaliste » couvert par les tests (JPEG à tables
@@ -136,10 +166,13 @@ dernière étape. Raccourcis connus :
   + `--offline=ALL --debug` (le debug journalise `tileLoadingFinished`).
 - `pkill -f` tue son propre shell si le motif matche la ligne de commande :
   écrire le motif en morceaux (`"josm-tes""ted.jar"`).
+- Vérification des liaisons sans GUI : `/tmp/opencode/LinkCheck.class`,
+  lancer `java -cp /usr/share/josm/josm.jar:build/libs/cog.jar:/tmp/opencode
+  LinkCheck build/libs/cog.jar` (le jar teste doit etre AUSSI dans le classpath).
 
 ## Feuille de route
 
-Phase 2 : reprojection par tuile (UTM, Lambert-93) via une matrice affine
-maison (pas de PRJ complet). Phase 3 : panneau STAC (Panoramax). Publication
-sur la liste des plugins JOSM (nécessite `Plugin-Mainversion` à jour et
+Phase 2 (faite) : reprojection par tuile (UTM, Lambert-93) via les formules
+`crs/` maison (pas de PRJ complet).
+Phase 3 : Publication sur la liste des plugins JOSM (nécessite `Plugin-Mainversion` à jour et
 javadoc/checkstyle JOSM si intégration upstream).

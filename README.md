@@ -32,9 +32,24 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Pyramide multi-niveaux, choix du meilleur niveau | ✅ |
 | Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |
-| Couche JOSM fonctionnelle (menu Imagery) | ✅ (à valider en GUI) |
-| Reprojection (Lambert-93, etc.) | ⏳ phase 2 |
+| Couche JOSM fonctionnelle (menu Imagery) | ✅ |
+| Reprojection (UTM, Lambert-93) | ✅ |
 | Panneau STAC (Panoramax) | ⏳ phase 3 |
+
+## Systèmes de coordonnées pris en charge
+
+| EPSG | Système |
+|---|---|
+| 4326 | géographique WGS84 |
+| 3857 | Web Mercator |
+| 32601–32660 | UTM WGS84 nord (zone N) |
+| 32701–32760 | UTM WGS84 sud (zone N) |
+| 2154 | RGF97 / Lambert-93 (France métropolitaine) |
+
+Les projections sont calculées en interne (séries de Snyder, précision
+sub-millimétrique en avant, validée contre GDAL/PROJ). Les datums non-WGS84
+(NTF, SAD69…) sont traités comme WGS84 : décalage possible de l'ordre de la
+centaine de mètres, acceptable pour un fond cartographique.
 
 ## Construire
 

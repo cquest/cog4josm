@@ -13,6 +13,8 @@ import org.openstreetmap.gui.jmapviewer.interfaces.ICoordinate;
 import org.openstreetmap.gui.jmapviewer.interfaces.IProjected;
 import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
+import org.openstreetmap.josm.plugins.cog.crs.Crs;
+import org.openstreetmap.josm.plugins.cog.crs.Projection;
 import org.openstreetmap.josm.plugins.cog.reader.CogInfo;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
@@ -31,6 +33,8 @@ public class CogTileSource extends AbstractTMSTileSource {
     private final OsmMercator mercator;
     private final int minZoom;
     private final int maxZoom;
+    /** Projection du COG (resolue a la demande, null pour 3857/4326 en voie lineaire). */
+    private volatile Projection projection;
 
     public CogTileSource(ImageryInfo info, CogReader reader) {
         super(info);
@@ -49,6 +53,19 @@ public class CogTileSource extends AbstractTMSTileSource {
     /** Lecteur COG attache a cette source (utilisé par CogTileLoaderJob). */
     public CogReader getReader() {
         return reader;
+    }
+
+    /**
+     * Projection du systeme de reference du COG (EPSG declare dans le fichier),
+     * ou null si le code est absent des registres du plugin.
+     */
+    public Projection getProjection() {
+        Projection p = projection;
+        if (p == null && cogInfo.crsCode != 0) {
+            p = Crs.forEpsg(cogInfo.crsCode);
+            projection = p;
+        }
+        return p;
     }
 
     @Override

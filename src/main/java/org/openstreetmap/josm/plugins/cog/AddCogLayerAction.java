@@ -11,7 +11,6 @@ import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.plugins.cog.layer.CogImageryLayer;
 import org.openstreetmap.josm.plugins.cog.reader.CogInfo;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
-import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 import org.openstreetmap.josm.tools.ImageProvider;
 import org.openstreetmap.josm.tools.Logging;
 
@@ -44,10 +43,11 @@ public class AddCogLayerAction extends JosmAction {
         try {
             reader = CogReader.open(url);
             CogInfo info = reader.info();
-            if (info.crsCode != 3857 && info.crsCode != 4326) {
+            if (!org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)) {
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                        tr("Projection EPSG:{0} non supportee (reprojection prevue en phase 2 ; "
-                                + "seuls EPSG:3857 et EPSG:4326 sont acceptes pour l''instant).", info.crsCode),
+                        tr("Projection EPSG:{0} non supportee. Systemes pris en charge : "
+                                + "EPSG:4326, EPSG:3857, fuseaux UTM WGS84 (32601-32660, 32701-32760) "
+                                + "et EPSG:2154 (Lambert-93).", info.crsCode),
                         tr("Unsupported projection"), JOptionPane.WARNING_MESSAGE);
                 reader.close();
                 return;
@@ -87,18 +87,38 @@ public class AddCogLayerAction extends JosmAction {
         }
     }
 
-    /** Emprise geographiques (lat/lon) du COG, calculees depuis ses modeles. */
+    /**
+     * Emprise geographique (lat/lon) du COG : la boite de ses coordonnees modeles
+     * est echantillonnee (coins + milieux des bords) puis deprojetee, ce qui suit
+     * la courbure des meridien/paralleles pour les systemes projetes.
+     */
     static org.openstreetmap.josm.data.Bounds latLonBounds(CogInfo info) {
         CogInfo.Level l0 = info.level(0);
         double minX = info.originX;
         double minY = info.originY - l0.height * info.scaleY;
         double maxX = info.originX + l0.width * info.scaleX;
         double maxY = info.originY;
-        if (info.crsCode == 4326) {
-            return new org.openstreetmap.josm.data.Bounds(minY, minX, maxY, maxX);
+        org.openstreetmap.josm.plugins.cog.crs.Projection proj =
+                org.openstreetmap.josm.plugins.cog.crs.Crs.forEpsg(info.crsCode);
+        if (proj == null) {
+            return new org.openstreetmap.josm.data.Bounds(-90, -180, 90, 180);
         }
-        return new org.openstreetmap.josm.data.Bounds(
-                MercatorTiles.yToLat(minY), MercatorTiles.xToLon(minX),
-                MercatorTiles.yToLat(maxY), MercatorTiles.xToLon(maxX));
+        double midX = (minX + maxX) / 2;
+        double midY = (minY + maxY) / 2;
+        double[][] pts = {
+            {minX, minY}, {midX, minY}, {maxX, minY},
+            {minX, midY}, {maxX, midY},
+            {minX, maxY}, {midX, maxY}, {maxX, maxY},
+        };
+        double minLat = Double.MAX_VALUE, maxLat = -Double.MAX_VALUE;
+        double minLon = Double.MAX_VALUE, maxLon = -Double.MAX_VALUE;
+        for (double[] p : pts) {
+            double[] ll = proj.unproject(p[0], p[1]);
+            minLat = Math.min(minLat, ll[0]);
+            maxLat = Math.max(maxLat, ll[0]);
+            minLon = Math.min(minLon, ll[1]);
+            maxLon = Math.max(maxLon, ll[1]);
+        }
+        return new org.openstreetmap.josm.data.Bounds(minLat, minLon, maxLat, maxLon);
     }
 }
