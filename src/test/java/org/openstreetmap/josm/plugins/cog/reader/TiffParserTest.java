@@ -78,8 +78,7 @@ class TiffParserTest {
     }
 
     @Test
-    void readsCustomGeoKeys() throws IOException {
-        double[] d = new double[9];
+    void readsCustomGeoKeys() throws IOException {        double[] d = new double[9];
         int[] keys = TestTiffWriter.customKeysLcc(d);
         byte[] tiff = TestTiffWriter.write(List.of(
                 new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
@@ -122,5 +121,42 @@ class TiffParserTest {
         assertEquals(Integer.valueOf(2), ci.customCrs.key(CustomCrs.KEY_MODEL_TYPE));
         assertEquals(6378249.2, ci.customCrs.dbl(CustomCrs.KEY_GEOG_SEMI_MAJOR), 1e-9);
         assertEquals(0.0, ci.customCrs.dbl(CustomCrs.KEY_GEOG_PRIME_MERIDIAN), 1e-12);
+    }
+
+    @Test
+    void readsHybridRegisteredCodeWithGeoKeysParams() throws IOException {
+        // cas PIX4Dmatic : code EPSG enregistre (3943) MAIS methode declaree
+        // "user-defined" (3074=32767) avec parametres complets en DOUBLE ->
+        // customCrs doit etre conserve (repli Crs.resolve si code inconnu)
+        double[] d = new double[9];
+        int[] keys = TestTiffWriter.customKeysLcc(d, 3943, 4171);
+        byte[] tiff = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
+                3943, keys, d, 100.0, 700000.0, 6600000.0);
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
+        assertEquals(3943, ci.crsCode);
+        org.junit.jupiter.api.Assertions.assertNotNull(ci.customCrs);
+        assertEquals(Integer.valueOf(32767), ci.customCrs.key(CustomCrs.KEY_PROJ_COORD_TRANS));
+        assertTrue(ci.crsDescription().startsWith("EPSG:3943"));
+        assertTrue(ci.crsDescription().contains("custom"));
+    }
+
+    @Test
+    void sortsHugePyramidWithoutIntOverflow() {
+        // COG PIX4Dmatic 131072x98304 : aire = 3x2^32 = 0 en int, et l'overview
+        // 65536x49152 = 3x2^30 devient negative : le tri placait une overview
+        // (NewSubfileType=1) en premier -> fausse erreur « IFD pleine resolution
+        // absent ». L'aire doit etre calculee en long.
+        java.util.List<CogInfo.Level> levels = new java.util.ArrayList<>();
+        levels.add(new CogInfo.Level(2, 32768, 24576, 128, 128, 7, 6, 1,
+                3, new int[]{8, 8, 8}, new int[0], 1, 1, false, new long[0], new long[0]));
+        levels.add(new CogInfo.Level(0, 131072, 98304, 128, 128, 7, 6, 1,
+                3, new int[]{8, 8, 8}, new int[0], 1, 0, false, new long[0], new long[0]));
+        levels.add(new CogInfo.Level(1, 65536, 49152, 128, 128, 7, 6, 1,
+                3, new int[]{8, 8, 8}, new int[0], 1, 1, false, new long[0], new long[0]));
+        TiffParser.sortLevelsByAreaDesc(levels);
+        assertEquals(131072, levels.get(0).width);
+        assertEquals(65536, levels.get(1).width);
+        assertEquals(32768, levels.get(2).width);
     }
 }

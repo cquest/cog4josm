@@ -45,11 +45,19 @@ public class AddCogLayerAction extends JosmAction {
             CogInfo info = reader.info();
             org.openstreetmap.josm.plugins.cog.crs.Projection proj = resolveProjection(info);
             if (proj == null) {
-                String why = info.crsCode == 0 || info.crsCode == org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED
-                        ? tryCustom(info)
-                        : (org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)
-                                ? "projection supportede mais resolution echouee"
-                                : "EPSG:" + info.crsCode + " inconnu du registre");
+                String why;
+                if (org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)) {
+                    why = "projection supportede mais resolution echouee";
+                } else if (info.customCrs != null && info.crsCode != 0
+                        && info.crsCode != org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED) {
+                    why = "EPSG:" + info.crsCode + " inconnu du registre, repli sur ses parametres GeoKeys echoue : "
+                            + tryCustom(info);
+                } else {
+                    why = info.crsCode == 0
+                            || info.crsCode == org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED
+                            ? tryCustom(info)
+                            : "EPSG:" + info.crsCode + " inconnu du registre";
+                }
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
                         tr("Systeme de reference du COG non supporte") + " (" + info.crsDescription() + ").\n"
                                 + "Raison : " + why + "\n\n"
@@ -98,17 +106,12 @@ public class AddCogLayerAction extends JosmAction {
 
     /**
      * Projection du systeme de reference declare par le COG (code EPSG
-     * enregistre ou GeoKeys "user-defined"), null si non resolvable.
+     * enregistre connu du registre, sinon GeoKeys "user-defined" 32767 ou
+     * parametres explicites joints a un code non repertorie), null si non
+     * resolvable.
      */
     static org.openstreetmap.josm.plugins.cog.crs.Projection resolveProjection(CogInfo info) {
-        if (info.crsCode != 0 && info.crsCode != org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED) {
-            return org.openstreetmap.josm.plugins.cog.crs.Crs.forEpsg(info.crsCode);
-        }
-        try {
-            return org.openstreetmap.josm.plugins.cog.crs.Crs.fromCustom(info.customCrs);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return org.openstreetmap.josm.plugins.cog.crs.Crs.resolve(info.crsCode, info.customCrs);
     }
 
     /** Motif d'echec de resolution du systeme custom (pour le message d'erreur). */

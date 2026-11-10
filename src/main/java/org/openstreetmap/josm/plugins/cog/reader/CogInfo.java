@@ -164,15 +164,18 @@ public final class CogInfo {
 
     /** Description lisible du systeme de reference (pour messages et journaux). */
     public String crsDescription() {
+        String customPart = null;
         if (customCrs != null) {
             Integer ct = customCrs.key(CustomCrs.KEY_PROJ_COORD_TRANS);
             Integer mc = customCrs.key(CustomCrs.KEY_PROJ_METHOD_CODE);
-            return "systeme custom (3074=" + ct + ", 3075=" + mc + ")";
+            customPart = "systeme custom (3074=" + ct + ", 3075=" + mc + ")";
         }
-        if (crsCode != 0) {
-            return "EPSG:" + crsCode;
+        if (crsCode != 0 && crsCode != CustomCrs.USER_DEFINED) {
+            // code enregistre ; le fichier peut aussi porter ses parametres
+            // GeoKeys (hybride, cf. Crs.resolve) : les deux sont affiches
+            return customPart != null ? "EPSG:" + crsCode + " + " + customPart : "EPSG:" + crsCode;
         }
-        return "systeme inconnu";
+        return customPart != null ? customPart : "systeme inconnu";
     }
 
     public double extentMinX() {

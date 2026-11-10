@@ -45,6 +45,31 @@ public final class Crs {
         return forEpsg(epsg) != null;
     }
 
+    /**
+     * Projection declaree par un COG : code EPSG enregistre si le registre le
+     * connait, sinon repli sur les parametres GeoKeys "user-defined" (3074=32767)
+     * que certains ecriveurs joignent a un code non repertorie (ex. exports
+     * PIX4Dmatic vers Lambert-43/EPSG:3943). Null si aucun systeme n'est
+     * resolvable ; le motif d'echec du repli s'obtient en rappelant
+     * {@link #fromCustom} (IllegalArgumentException).
+     */
+    public static Projection resolve(int crsCode, CustomCrs custom) {
+        if (crsCode != 0 && crsCode != CustomCrs.USER_DEFINED) {
+            Projection p = forEpsg(crsCode);
+            if (p != null) {
+                return p;
+            }
+        }
+        if (custom == null) {
+            return null;
+        }
+        try {
+            return fromCustom(custom);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static Projection create(int epsg) {
         if (epsg == 4326) {
             return new Geographic(4326);
@@ -126,11 +151,16 @@ public final class Crs {
 
     private static Projection projected(CustomCrs c) {
         Integer pcs = c.key(CustomCrs.KEY_PROJ_CODE);
-        if (pcs != null && pcs != CustomCrs.USER_DEFINED) {
+        Integer coordTrans = c.key(CustomCrs.KEY_PROJ_COORD_TRANS);
+        if (pcs != null && pcs != CustomCrs.USER_DEFINED
+                && (coordTrans == null || coordTrans != CustomCrs.USER_DEFINED)) {
+            // code enregistre sans methode "user-defined" : pas de parametres
+            // exploitables, c'est une clef GeoTIFF classique mal routee ici
             throw new IllegalArgumentException("projection enregistree " + pcs
                     + " : clefs custom incoherentes");
         }
-        Integer coordTrans = c.key(CustomCrs.KEY_PROJ_COORD_TRANS);
+        // sinon : 3074=32767 garantit que les parametres de methode sont presents
+        // (convention GDAL/PIX4D), meme si 3072 porte un code enregistre (hybride)
         Integer methodCode = c.key(CustomCrs.KEY_PROJ_METHOD_CODE);
         int method = resolveMethod(coordTrans, methodCode);
 

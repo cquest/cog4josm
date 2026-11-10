@@ -48,19 +48,30 @@ public class CogTileSource extends AbstractTMSTileSource {
         this.mercator = new OsmMercator(info.getTileSize());
         this.minZoom = 0;
         this.maxZoom = MAX_ZOOM;
-        if (cogInfo.crsCode == 0 || cogInfo.crsCode == CustomCrs.USER_DEFINED) {
-            // resout des l'ouverture les systemes "user-defined" (GeoKeys 32767)
-            try {
-                projection = Crs.fromCustom(cogInfo.customCrs);
-            } catch (IllegalArgumentException e) {
-                crsError = e.getMessage();
-            }
-        } else if (cogInfo.crsCode != 3857 && cogInfo.crsCode != 4326) {
-            projection = Crs.forEpsg(cogInfo.crsCode);
+        if (cogInfo.crsCode != 3857 && cogInfo.crsCode != 4326) {
+            // resout des l'ouverture le systeme du COG : code EPSG enregistre
+            // connu du registre, sinon GeoKeys "user-defined" (32767, ou code
+            // non repertorie accompagne de ses parametres explicites)
+            projection = Crs.resolve(cogInfo.crsCode, cogInfo.customCrs);
             if (projection == null) {
-                crsError = "EPSG:" + cogInfo.crsCode + " non supporte";
+                crsError = crsErrorReason();
             }
         }
+    }
+
+    /** Motif d'echec de resolution du systeme (pour message d'erreur). */
+    private String crsErrorReason() {
+        if (cogInfo.customCrs != null) {
+            try {
+                Crs.fromCustom(cogInfo.customCrs);
+                return "EPSG:" + cogInfo.crsCode + " non supporte";
+            } catch (IllegalArgumentException e) {
+                String prefix = cogInfo.crsCode == 0 || cogInfo.crsCode == CustomCrs.USER_DEFINED
+                        ? "" : "EPSG:" + cogInfo.crsCode + " non supporte, repli sur parametres GeoKeys echoue : ";
+                return prefix + e.getMessage();
+            }
+        }
+        return cogInfo.crsCode == 0 ? "systeme de reference absent" : "EPSG:" + cogInfo.crsCode + " non supporte";
     }
 
     public CogInfo getCogInfo() {

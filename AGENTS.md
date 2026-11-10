@@ -97,6 +97,12 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
   circule est fausse). Les formules latToY/yToLat doivent utiliser R, pas
   π·R. Un aller-retour seul ne détecte pas une erreur symétrique : les tests
   contiennent des **valeurs absolues de contrôle**, les conserver.
+- **Tri de pyramide en int** : l'aire `width*height` d'un niveau déborde
+  `int` dès 2^31 pixels (COG PIX4Dmatic 131072x98304 = 3x2^32 → aire 0, et
+  l'overview 65536x49152 = 3x2^30 → négative) : les overviews passaient
+  avant le niveau 0 et le garde `flags&1` criait « IFD de pleine resolution
+  absent » sur des fichiers pourtant conformes. Utiliser `Long.compare`
+  (`TiffParser.sortLevelsByAreaDesc`, test non-regression dedie).
 
 ## Pièges API JOSM (validé sur r19678, `lib/josm-tested.jar`)
 
@@ -170,6 +176,17 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
 - Les COG ecrits par GDAL en custom peuvent avoir 2061=0 meme si lon_0 etait
   non nul dans la chaine PROJ generatrice : se fier aux GeoKeys lus, pas a
   l'intention de generation (cas du fixture longlat).
+- **Hybride « code enregistre + parametres »** (exports PIX4Dmatic, ex.
+  COG_BayonneSudEst.tif en EPSG:3943/Lambert-43) : 3072 porte un code EPSG
+  connu de GDAL mais inconnu de notre registre, et 3074=32767 garantit que
+  TOUS les parametres de methode sont presents en DOUBLE. Regle : `TiffParser`
+  garde le `CustomCrs` des que 3074=32767, et `Crs.resolve(code, custom)`
+  tente le registre EPSG d'abord puis les parametres (jamais l'inverse, un
+  code au registre gagne). Sans 3074=32767, un 3072 enregistre reste refuse
+  (« clefs custom incoherentes ») : pas de parametres exploitables.
+  L'ecriveur de test aligne le bloc custom sur la PRESENCE de customKeys,
+  pas sur la valeur de crs (sinon 2 entrees IFD manquees, decalement de
+  24 octets de tout le bloc geographique).
 
 ## Exemple COG de référence
 

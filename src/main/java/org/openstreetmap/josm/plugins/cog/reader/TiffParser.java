@@ -297,7 +297,7 @@ public final class TiffParser {
             }
             throw new IOException("Aucun niveau tuile trouve (pas un TIFF tuile)");
         }
-        levels.sort((a, b) -> Integer.compare(b.width * b.height, a.width * a.height));
+        sortLevelsByAreaDesc(levels);
         for (int i = 0; i < levels.size(); i++) {
             if (levels.get(i).index != i) {
                 levels.set(i, levels.get(i).withIndex(i));
@@ -326,10 +326,30 @@ public final class TiffParser {
         if (crs == 0 || crs == CustomCrs.USER_DEFINED) {
             // code absent ou "user-defined" : les clefs GeoTIFF decrivent le systeme
             custom = customCrsFromGeoKeys(geo);
+        } else {
+            // code enregistre (ex. EPSG:3943 Lambert-43) mais methode declaree
+            // "user-defined" (3074=32767) : le fichier porte les parametres
+            // complets du systeme. On les conserve ; ils serviront de repli si
+            // le code n'est pas au registre (Crs.resolve).
+            CustomCrs c = customCrsFromGeoKeys(geo);
+            Integer ct = c == null ? null : c.key(CustomCrs.KEY_PROJ_COORD_TRANS);
+            if (ct != null && ct == CustomCrs.USER_DEFINED) {
+                custom = c;
+            }
         }
         String noData = geo.entry(TAG_GDAL_NODATA) == null ? null : geo.entry(TAG_GDAL_NODATA).ascii;
 
         return new CogInfo(levels, crs, custom, originX, originY, scaleX, scaleY, noData);
+    }
+
+    /**
+     * Tri du plus fin au plus grossier par aire croissante… attention : aire
+     * calculee en LONG (131072x98304 = 3x2^32 deborde int et se retrouve 0,
+     * ce qui placait les overviews avant la pleine resolution — erreur
+     * « IFD de pleine resolution absent » sur les gros COG PIX4Dmatic).
+     */
+    static void sortLevelsByAreaDesc(List<CogInfo.Level> levels) {
+        levels.sort((a, b) -> Long.compare((long) b.width * b.height, (long) a.width * a.height));
     }
 
     private static CogInfo.Level toLevel(Ifd ifd, int index, boolean be) throws IOException {

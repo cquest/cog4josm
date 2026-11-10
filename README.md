@@ -57,6 +57,11 @@ ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 | 8 | Conique conforme de Lambert 1SP/2SP |
 | — | Systématique (géographique), ellipsoïde + premier méridien |
 
+Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
+GeoKeys** (cas des exports PIX4Dmatic vers Lambert-43/EPSG:3943, par
+exemple) est reconnu par le même mécanisme : le plugin retombe sur les
+paramètres déclarés.
+
 Tout autre méthode (Albers 11, Mercator oblique…), unité angulaire non
 degré ou paramètre manquant est **refusé avec un message d'erreur
 explicite** — jamais reprojeté silencieusement.

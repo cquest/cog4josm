@@ -269,8 +269,7 @@ class CustomCrsTest {
 
     /** Unites lineaires non metres : les coordonnees modeles sont mises a l'echelle. */
     @Test
-    void linearUnitsScaled() {
-        double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
+    void linearUnitsScaled() {        double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
         Key[] keys = {
             new Key(1024, 0, 1, 1),
             new Key(2056, 0, 1, 7019),
@@ -289,5 +288,85 @@ class CustomCrsTest {
         double[] xy = p.project(46.5, 3.0);
         assertEquals(700000.0 / 0.3048, xy[0], 1e-3, "pieds attendus");
         assertEquals(6600000.0 / 0.3048, xy[1], 1e-3);
+    }
+
+    /**
+     * Clefs « hybrides » a la PIX4Dmatic : 3072 porte un code enregistre
+     * (EPSG:3943, Lambert-43 / CC43) mais 3074=32767 garantit la presence de
+     * tous les parametres de methode en DOUBLE. References GDAL (osgeo,
+     * ImportFromEPSG 3943) : le systeme decrit est exactement CC43.
+     */
+    private static CustomCrs cc43Keys() {
+        double[] d = {43.0, 3.0, 42.25, 43.75, 1700000.0, 2200000.0,
+                298.257222101, 6378137.0, 0.0};
+        Key[] keys = {
+            new Key(1024, 0, 1, 1),
+            new Key(2048, 0, 1, 4171),  // RGF93 enregistre
+            new Key(2054, 0, 1, 9102),
+            new Key(2056, 0, 1, 7019),  // GRS80
+            new Key(2057, 34736, 1, 7),
+            new Key(2059, 34736, 1, 6),
+            new Key(2061, 34736, 1, 8),
+            new Key(3072, 0, 1, 3943),  // code enregistre (hybride)
+            new Key(3074, 0, 1, 32767), // methode user-defined : parametres presents
+            new Key(3075, 0, 1, 8),
+            new Key(3076, 0, 1, 9001),
+            new Key(3078, 34736, 1, 2),
+            new Key(3079, 34736, 1, 3),
+            new Key(3084, 34736, 1, 1),
+            new Key(3085, 34736, 1, 0),
+            new Key(3086, 34736, 1, 4),
+            new Key(3087, 34736, 1, 5),
+        };
+        return new CustomCrs(keys, d, "RGF93 v1 / CC43|");
+    }
+
+    @Test
+    void hybridRegisteredCodeWithParamsMatchesGdal() {
+        Projection p = Crs.fromCustom(cc43Keys());
+        assertTrue(p instanceof LambertConformalConic2SP);
+        double[][] cc43 = {
+            {3.0, 43.0, 1700000.0000, 2200000.0000},
+            {-1.4744, 43.4929, 1338271.6656, 2264391.2277},
+            {2.5, 44.5, 1660225.1817, 2366784.2180},
+        };
+        for (double[] c : cc43) {
+            double[] xy = p.project(c[1], c[0]);
+            assertEquals(c[2], xy[0], 0.001, "x(" + c[0] + "," + c[1] + ")");
+            assertEquals(c[3], xy[1], 0.001, "y(" + c[0] + "," + c[1] + ")");
+            double[] ll = p.unproject(c[2], c[3]);
+            assertEquals(c[1], ll[0], 1e-8);
+            assertEquals(c[0], ll[1], 1e-8);
+        }
+    }
+
+    /** Code enregistre SANS 3074=32767 : pas de parametres, clefs jugees incoherentes. */
+    @Test
+    void registeredCodeWithoutCustomTransRejected() {
+        Key[] keys = {
+            new Key(1024, 0, 1, 1),
+            new Key(2048, 0, 1, 4171),
+            new Key(3072, 0, 1, 2154), // code Lambert-93 sans methode user-defined
+        };
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Crs.fromCustom(new CustomCrs(keys, new double[0], null)));
+        assertTrue(e.getMessage().contains("enregistree"));
+    }
+
+    /** Crs.resolve : registre d'abord, repli sur les parametres GeoKeys sinon. */
+    @Test
+    void resolvePrefersRegistryThenParams() {
+        // code au registre : c'est lui qui gagne, les parametres sont ignores
+        Projection l93 = Crs.resolve(2154, cc43Keys());
+        assertSame(Crs.forEpsg(2154), l93);
+        // code absent du registre mais parametres presents : repli custom
+        Projection cc43 = Crs.resolve(3943, cc43Keys());
+        assertTrue(cc43 instanceof LambertConformalConic2SP);
+        double[] xy = cc43.project(43.0, 3.0);
+        assertEquals(1700000.0, xy[0], 1e-6);
+        assertEquals(2200000.0, xy[1], 1e-6);
+        // ni code connu ni parametres : null (message porte par fromCustom)
+        org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(3943, null));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(0, null));
     }
 }

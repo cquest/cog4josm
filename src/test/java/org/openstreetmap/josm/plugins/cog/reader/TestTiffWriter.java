@@ -124,15 +124,14 @@ final class TestTiffWriter {
         return 72 + 2L * nCustomKeys + 8L * nCustomDbl + CITATION.length() + 1;
     }
 
-    private static boolean isCustomCrs(int crs) {
-        return crs == 32767;
-    }
-
     private static void writeIfd(ByteArrayOutputStream out, LevelSpec lv, int i, long[] ifdOff,
                                  long ext, int n, int firstTile, long[] tileOff, long[] tileCnt,
                                  int crs, int nCustomKeys, int nCustomDbl)
             throws java.io.IOException {
-        boolean custom = i == 0 && isCustomCrs(crs);
+        // le bloc custom (34736/34737) depend de la presence des clefs, pas de la
+        // valeur de crs : un cas « hybride » (code enregistre + parametres, cf.
+        // PIX4Dmatic) doit garder exactly la meme repartition des octets
+        boolean custom = i == 0 && nCustomKeys > 0;
         long bpsOff = ext + 8L * n;
         long geoBase = bpsOff + (lv.grey() ? 0 : 6);
         List<long[]> es = new ArrayList<>();
@@ -220,6 +219,15 @@ final class TestTiffWriter {
      * referencees dans la balise 34736. Renvoie {keys, doubles, originAnchorOk}.
      */
     static int[] customKeysLcc(double[] doublesOutHolder) {
+        return customKeysLcc(doublesOutHolder, 32767, 32767);
+    }
+
+    /**
+     * Meme repertoire mais 3072/2048 portent des codes enregistres : variante
+     * « hybride » exportee par PIX4Dmatic (ex. EPSG:3943 + 3074=32767 et tous
+     * les parametres en DOUBLE, cf. COG_BayonneSudEst.tif).
+     */
+    static int[] customKeysLcc(double[] doublesOutHolder, int pcsCode, int gcsCode) {
         double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
         if (doublesOutHolder != null && doublesOutHolder.length >= d.length) {
             System.arraycopy(d, 0, doublesOutHolder, 0, d.length);
@@ -227,13 +235,13 @@ final class TestTiffWriter {
         return new int[]{
                 1, 1, 0, 17, // en-tete : 17 clefs
                 1024, 0, 1, 1,       // ModelTypeGeoKey = Projected
-                2048, 0, 1, 32767, // GCS user-defined
+                2048, 0, 1, gcsCode, // GCS (user-defined ou code enregistre)
                 2054, 0, 1, 9102, // unites angulaires : degres
                 2056, 0, 1, 7019, // ellipsoide GRS 1980
                 2057, 34736, 1, 7,   // demi-grand axe -> dbl[7]
                 2059, 34736, 1, 6,   // aplatissement inverse -> dbl[6]
                 2061, 34736, 1, 8,   // meridien principal -> dbl[8]
-                3072, 0, 1, 32767, // PCS user-defined
+                3072, 0, 1, pcsCode, // PCS (user-defined ou code enregistre)
                 3074, 0, 1, 32767, // ProjCoordTrans user-defined
                 3075, 0, 1, 8,     // methode = Lambert Conf Conic 2SP
                 3076, 0, 1, 9001,  // unites lineaires : metre
