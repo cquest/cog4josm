@@ -24,9 +24,9 @@ public final class TileDecoder {
 
     public static BufferedImage decode(CogInfo.Level level, byte[] raw) throws IOException {
         if (raw.length >= 2 && (raw[0] & 0xFF) == 0xFF && (raw[1] & 0xD8) == 0xD8) {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(withJpegTables(raw, level.jpegTables)));
             if (img == null) {
-                throw new IOException("Tuile JPEG non decodable (manque peut-etre les tables JPEGQTables)");
+                throw new IOException("Tuile JPEG non decodable (manque peut-etre les tables JPEGTables)");
             }
             return img;
         }
@@ -52,6 +52,53 @@ public final class TileDecoder {
             applyHorizontalPredictor(px, level);
         }
         return toImage(px, level);
+    }
+
+    // ---------------------------------------------------------------- JPEG tables
+
+    /**
+     * Certaines ecritures TIFF (GDAL, COG driver) stockent les tables JPEG
+     * (quantification DQT...) dans la balise JPEGTables (347) au lieu de les
+     * embarquer dans chaque tuile : le flux de la tuile commence par SOI puis
+     * SOF sans DQT, et ImageIO refuse de le decoder. Reconstitue un flux JPEG
+     * valide en inserant les tables apres le SOI de la balise.
+     */
+    static byte[] withJpegTables(byte[] raw, byte[] tables) {
+        if (tables == null || tables.length < 4 || (tables[0] & 0xFF) != 0xFF || (tables[1] & 0xD8) != 0xD8) {
+            return raw;
+        }
+        // scanner les segments jusqu'a SOS : si une DQT est deja presente, rien a faire
+        int i = 2;
+        while (i + 1 < raw.length && (raw[i] & 0xFF) == 0xFF) {
+            int m = raw[i + 1] & 0xFF;
+            if (m == 0xDB) {
+                return raw;
+            }
+            if (m == 0xDA || m == 0xD9) {
+                break;
+            }
+            if (m == 0x01 || (m >= 0xD0 && m <= 0xD7) || m == 0xD8) {
+                i += 2;
+                continue;
+            }
+            if (i + 3 >= raw.length) {
+                break;
+            }
+            int len = ((raw[i + 2] & 0xFF) << 8) | (raw[i + 3] & 0xFF);
+            if (len < 2) {
+                break;
+            }
+            i += 2 + len;
+        }
+        // bloc tables = SOI + segments, sans l'EOI final eventuel
+        int tlen = tables.length;
+        if (tlen >= 2 && (tables[tlen - 2] & 0xFF) == 0xFF && (tables[tlen - 1] & 0xFF) == 0xD9) {
+            tlen -= 2;
+        }
+        byte[] out = new byte[tlen + raw.length - 2];
+        System.arraycopy(tables, 0, out, 0, tlen);
+        System.arraycopy(raw, 2, out, tlen, raw.length - 2);
+        return out;
     }
 
     // ---------------------------------------------------------------- inflate

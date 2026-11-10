@@ -27,6 +27,7 @@ public final class TiffParser {
     public static final int TAG_TILE_LENGTH = 323;
     public static final int TAG_TILE_OFFSETS = 324;
     public static final int TAG_TILE_BYTE_COUNTS = 325;
+    public static final int TAG_JPEG_TABLES = 347;
     public static final int TAG_ROWS_PER_STRIP = 278;
     public static final int TAG_STRIP_OFFSETS = 273;
     public static final int TAG_SAMPLES_PER_PIXEL = 277;
@@ -361,6 +362,7 @@ public final class TiffParser {
                 extras[i] = (int) extra[i];
             }
         }
+        byte[] jpegTables = readJpegTables(ifd);
         return new CogInfo.Level(
                 index, width, height, tw, th,
                 (int) ifd.getLong(TAG_COMPRESSION, 1),
@@ -369,7 +371,20 @@ public final class TiffParser {
                 samples, bits, extras,
                 (int) ifd.getLong(TAG_SAMPLE_FORMAT, 1),
                 (int) ifd.getLong(TAG_NEW_SUBFILETYPE, 0),
-                be, offsets, counts);
+                be, offsets, counts, jpegTables);
+    }
+
+    /** Tables JPEG de la balise JPEGTables (347), ou null si absente/vide. */
+    private static byte[] readJpegTables(Ifd ifd) {
+        IfdEntry e = ifd.entry(TAG_JPEG_TABLES);
+        if (e == null || e.longs == null || e.longs.length == 0) {
+            return null;
+        }
+        byte[] out = new byte[e.longs.length];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) e.longs[i];
+        }
+        return out;
     }
 
     /** Extrait le code EPSG des GeoKeys (1024=type modele, 3072=projected, 2048=geographic). */

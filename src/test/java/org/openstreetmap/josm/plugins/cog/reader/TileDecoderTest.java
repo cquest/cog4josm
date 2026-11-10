@@ -89,4 +89,32 @@ class TileDecoderTest {
             }
         }
     }
+
+    /**
+     * Tuile JPEG ecrite par GDAL (COG driver) : pas de DQT dans le flux,
+     * tables de quantification dans la balise JPEGTables (347).
+     * Fixture extraite de cog-paris-3857.tif (gdalwarp -of COG -co COMPRESS=JPEG).
+     */
+    @Test
+    void jpegTileWithExternalTables() throws IOException {
+        byte[] tables = readFile("gdal-jpeg-tables.bin");
+        byte[] tile = readFile("gdal-jpeg-tile.bin");
+        assertEquals(0xFF, tile[0] & 0xFF);
+        assertEquals(0xD8, tile[1] & 0xFF);
+        CogInfo.Level lvl = new CogInfo.Level(0, 512, 512, 512, 512, 7, 6, 1,
+                3, new int[] {8, 8, 8}, new int[0], 1, 0, false,
+                new long[] {0}, new long[] {tile.length}, tables);
+        BufferedImage img = TileDecoder.decode(lvl, tile);
+        assertEquals(512, img.getWidth());
+        assertEquals(512, img.getHeight());
+    }
+
+    private static byte[] readFile(String name) throws IOException {
+        try (var in = TileDecoderTest.class.getClassLoader().getResourceAsStream(name)) {
+            if (in == null) {
+                throw new IOException("fixture manquante : " + name);
+            }
+            return in.readAllBytes();
+        }
+    }
 }

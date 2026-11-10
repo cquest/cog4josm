@@ -32,11 +32,27 @@ public final class CogInfo {
         public final boolean bigEndian;
         public final long[] tileOffsets;
         public final long[] tileByteCounts;
+        /**
+         * Tables JPEG externes (balise TIFF JPEGTables 347), null si absentes.
+         * GDAL y stocke les tables de quantification quand les tuiles JPEG
+         * compressees ne les embarquent pas.
+         */
+        public final byte[] jpegTables;
 
         Level(int index, int width, int height, int tileWidth, int tileHeight,
               int compression, int photometric, int predictor,
               int samplesPerPixel, int[] bitsPerSample, int[] extraSamples,
               int sampleFormat, int flags, boolean bigEndian, long[] tileOffsets, long[] tileByteCounts) {
+            this(index, width, height, tileWidth, tileHeight, compression, photometric, predictor,
+                    samplesPerPixel, bitsPerSample, extraSamples, sampleFormat, flags, bigEndian,
+                    tileOffsets, tileByteCounts, null);
+        }
+
+        Level(int index, int width, int height, int tileWidth, int tileHeight,
+              int compression, int photometric, int predictor,
+              int samplesPerPixel, int[] bitsPerSample, int[] extraSamples,
+              int sampleFormat, int flags, boolean bigEndian, long[] tileOffsets, long[] tileByteCounts,
+              byte[] jpegTables) {
             this.index = index;
             this.width = width;
             this.height = height;
@@ -53,12 +69,13 @@ public final class CogInfo {
             this.bigEndian = bigEndian;
             this.tileOffsets = tileOffsets;
             this.tileByteCounts = tileByteCounts;
+            this.jpegTables = jpegTables;
         }
 
         Level withIndex(int i) {
             return new Level(i, width, height, tileWidth, tileHeight, compression, photometric,
                     predictor, samplesPerPixel, bitsPerSample, extraSamples, sampleFormat,
-                    flags, bigEndian, tileOffsets, tileByteCounts);
+                    flags, bigEndian, tileOffsets, tileByteCounts, jpegTables);
         }
 
         public int numXTiles() {
