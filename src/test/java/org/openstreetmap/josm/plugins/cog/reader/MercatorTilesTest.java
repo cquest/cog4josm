@@ -21,6 +21,23 @@ class MercatorTilesTest {
     }
 
     @Test
+    void mercatorKnownValues() {
+        // Valeurs absolues (EPSG:3857 officiel, R=6378137) : un facteur pi
+        // commun a latToY/yToLat passerait inapercu en aller-retour seul.
+        assertEquals(0.0, MercatorTiles.latToY(0.0), 1e-6);
+        assertEquals(0.0, MercatorTiles.yToLat(0.0), 1e-9);
+        assertEquals(6240993.463, MercatorTiles.latToY(48.80), 1.0);
+        assertEquals(6261297.953, MercatorTiles.latToY(48.92), 1.0);
+        assertEquals(48.80, MercatorTiles.yToLat(6240993.463), 1e-6);
+        assertEquals(48.92, MercatorTiles.yToLat(6261297.953), 1e-6);
+        assertEquals(250468.854, MercatorTiles.lonToX(2.25), 1.0);
+        assertEquals(2.25, MercatorTiles.xToLon(250468.854), 1e-6);
+        // Limites : +-180 deg <-> +-demi-circonference
+        assertEquals(MercatorTiles.HALF_CIRCUMFERENCE, MercatorTiles.lonToX(180.0), 1e-6);
+        assertEquals(-MercatorTiles.MAX_MERC_LAT, MercatorTiles.yToLat(-MercatorTiles.HALF_CIRCUMFERENCE), 1e-6);
+    }
+
+    @Test
     void tileBoundsAtZoom0() {
         Bounds b = MercatorTiles.tileBounds(0, 0, 0);
         assertEquals(-MercatorTiles.HALF_CIRCUMFERENCE, b.minX(), 1.0);
