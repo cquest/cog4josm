@@ -1,0 +1,61 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'org.openstreetmap.josm.plugins'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // API JOSM (contient aussi JMapViewer, JCS…). Récupérable via ./fetch-josm.sh
+    compileOnly files('lib/josm-tested.jar')
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}
+
+jar {
+    archiveFileName = 'cog.jar'
+    manifest {
+        def buildDate = new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date())
+        attributes(
+            'Plugin-Main-Class': 'org.openstreetmap.josm.plugins.cog.CogPlugin',
+            'Plugin-Main-Version': '19678',
+            'Plugin-Min-Version': '19600',
+            'Plugin-Description': 'Affiche des images COG (Cloud Optimized GeoTIFF) distantes comme couches d\'arriere-plan, lues par HTTP byte-ranges',
+            'Plugin-Date': buildDate,
+            'Implementation-Title': 'cog',
+            'Implementation-Version': project.version
+        )
+    }
+}
+
+// CLI de diagnostic (phase 0 du plan) : ./gradlew spike --args="https://exemple.com/image.tif"
+tasks.register('spike', JavaExec) {
+    group = 'application'
+    description = 'Lit les en-tetes d un COG distant via byte-ranges et affiche la pyramide'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.openstreetmap.josm.plugins.cog.reader.CogDumpCli'
+}

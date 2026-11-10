@@ -1,0 +1,49 @@
+package org.openstreetmap.josm.plugins.cog.reader;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.util.List;
+
+import java.awt.image.BufferedImage;
+
+import org.junit.jupiter.api.Test;
+
+class MercatorTilesTest {
+
+    @Test
+    void latLonRoundTrip() {
+        double lat = 48.85, lon = 2.35;
+        assertEquals(lon, MercatorTiles.xToLon(MercatorTiles.lonToX(lon)), 1e-9);
+        assertEquals(lat, MercatorTiles.yToLat(MercatorTiles.latToY(lat)), 1e-9);
+    }
+
+    @Test
+    void tileBoundsAtZoom0() {
+        Bounds b = MercatorTiles.tileBounds(0, 0, 0);
+        assertEquals(-MercatorTiles.HALF_CIRCUMFERENCE, b.minX(), 1.0);
+        assertEquals(MercatorTiles.HALF_CIRCUMFERENCE, b.maxX(), 1.0);
+        assertEquals(-MercatorTiles.HALF_CIRCUMFERENCE, b.minY(), 1.0);
+        assertEquals(MercatorTiles.HALF_CIRCUMFERENCE, b.maxY(), 1.0);
+    }
+
+    @Test
+    void tileBoundsAdjacent() {
+        Bounds a = MercatorTiles.tileBounds(5, 3, 7);
+        Bounds b = MercatorTiles.tileBounds(5, 4, 7);
+        assertEquals(a.maxX(), b.minX(), 1e-6);
+        assertEquals(a.minY(), b.minY(), 1e-6);
+        assertTrue(a.width() > 0);
+    }
+
+    @Test
+    void northWestTileBounds() {
+        Bounds b = MercatorTiles.tileBounds(1, 0, 0);
+        assertEquals(-MercatorTiles.HALF_CIRCUMFERENCE, b.minX(), 1.0);
+        assertEquals(0.0, b.maxX(), 1.0);
+        assertEquals(0.0, b.minY(), 1.0);
+        assertEquals(MercatorTiles.HALF_CIRCUMFERENCE, b.maxY(), 1.0);
+    }
+}
