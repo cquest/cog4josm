@@ -14,9 +14,11 @@ import org.openstreetmap.gui.jmapviewer.interfaces.IProjected;
 import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.plugins.cog.crs.Crs;
+import org.openstreetmap.josm.plugins.cog.crs.Geographic;
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
 import org.openstreetmap.josm.plugins.cog.reader.CogInfo;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
+import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 
 /**
@@ -35,6 +37,8 @@ public class CogTileSource extends AbstractTMSTileSource {
     private final int maxZoom;
     /** Projection du COG (resolue a la demande, null pour 3857/4326 en voie lineaire). */
     private volatile Projection projection;
+    /** Message d'erreur si le systeme custom du COG n'a pu etre resolu (null sinon). */
+    private volatile String crsError;
 
     public CogTileSource(ImageryInfo info, CogReader reader) {
         super(info);
@@ -44,6 +48,19 @@ public class CogTileSource extends AbstractTMSTileSource {
         this.mercator = new OsmMercator(info.getTileSize());
         this.minZoom = 0;
         this.maxZoom = MAX_ZOOM;
+        if (cogInfo.crsCode == 0 || cogInfo.crsCode == CustomCrs.USER_DEFINED) {
+            // resout des l'ouverture les systemes "user-defined" (GeoKeys 32767)
+            try {
+                projection = Crs.fromCustom(cogInfo.customCrs);
+            } catch (IllegalArgumentException e) {
+                crsError = e.getMessage();
+            }
+        } else if (cogInfo.crsCode != 3857 && cogInfo.crsCode != 4326) {
+            projection = Crs.forEpsg(cogInfo.crsCode);
+            if (projection == null) {
+                crsError = "EPSG:" + cogInfo.crsCode + " non supporte";
+            }
+        }
     }
 
     public CogInfo getCogInfo() {
@@ -56,16 +73,22 @@ public class CogTileSource extends AbstractTMSTileSource {
     }
 
     /**
-     * Projection du systeme de reference du COG (EPSG declare dans le fichier),
-     * ou null si le code est absent des registres du plugin.
+     * Projection du systeme de reference du COG (code EPSG ou GeoKeys custom),
+     * ou null si le systeme est absent ou non supporte (voir {@link #getCrsError()}).
      */
     public Projection getProjection() {
-        Projection p = projection;
-        if (p == null && cogInfo.crsCode != 0) {
-            p = Crs.forEpsg(cogInfo.crsCode);
-            projection = p;
-        }
-        return p;
+        return projection;
+    }
+
+    /** Reason pour lequel la projection est absente (null si le COG est exploitable). */
+    public String getCrsError() {
+        return crsError;
+    }
+
+    /** Vrai si les coordonnees modeles sont des degres (EPSG:4326 ou geographique custom PM=0). */
+    public boolean isGeographicDegrees() {
+        return cogInfo.crsCode == 4326
+                || (projection instanceof Geographic g && g.epsg() == 0 && g.isPrimeMeridianZero());
     }
 
     @Override
@@ -202,7 +225,7 @@ public class CogTileSource extends AbstractTMSTileSource {
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "CogTileSource[%s, %d niveaux, EPSG:%d]",
-                getId(), cogInfo.levelCount(), cogInfo.crsCode);
+        return String.format(Locale.ROOT, "CogTileSource[%s, %d niveaux, %s]",
+                getId(), cogInfo.levelCount(), cogInfo.crsDescription());
     }
 }

@@ -74,5 +74,53 @@ class TiffParserTest {
         CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
         assertEquals(4326, ci.crsCode);
         assertArrayEquals(new int[]{8}, ci.level(0).bitsPerSample);
+        org.junit.jupiter.api.Assertions.assertNull(ci.customCrs);
+    }
+
+    @Test
+    void readsCustomGeoKeys() throws IOException {
+        double[] d = new double[9];
+        int[] keys = TestTiffWriter.customKeysLcc(d);
+        byte[] tiff = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
+                32767, keys, d, 100.0, 700000.0, 6600000.0);
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
+        assertEquals(32767, ci.crsCode);
+        org.junit.jupiter.api.Assertions.assertNotNull(ci.customCrs);
+        assertEquals(Integer.valueOf(1), ci.customCrs.key(CustomCrs.KEY_MODEL_TYPE));
+        assertEquals(Integer.valueOf(32767), ci.customCrs.key(CustomCrs.KEY_PROJ_CODE));
+        assertEquals(Integer.valueOf(8), ci.customCrs.key(CustomCrs.KEY_PROJ_METHOD_CODE));
+        assertEquals(Integer.valueOf(9001), ci.customCrs.key(CustomCrs.KEY_PROJ_LINEAR_UNITS));
+        assertEquals(49.0, ci.customCrs.dbl(CustomCrs.KEY_PROJ_STD_PARALLEL2), 1e-12);
+        assertEquals(6600000.0, ci.customCrs.dbl(CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING), 1e-12);
+        assertEquals(6378137.0, ci.customCrs.dbl(CustomCrs.KEY_GEOG_SEMI_MAJOR), 1e-9);
+        org.junit.jupiter.api.Assertions.assertNotNull(ci.customCrs.citation);
+        // le parseur ne doit pas confondre clef inline et reference DOUBLE
+        org.junit.jupiter.api.Assertions.assertNull(ci.customCrs.key(CustomCrs.KEY_PROJ_STD_PARALLEL1));
+        org.junit.jupiter.api.Assertions.assertTrue(ci.crsDescription().contains("custom"));
+    }
+
+    @Test
+    void readsCustomGeographicKeys() throws IOException {
+        double[] d = {6378249.2, 293.4660212936269, 0.0, 2.5};
+        int[] keys = {
+                1, 1, 0, 8,
+                1024, 0, 1, 2,
+                2048, 0, 1, 32767,
+                2054, 0, 1, 9102,
+                2056, 0, 1, 32767,
+                2057, 34736, 1, 0,
+                2059, 34736, 1, 1,
+                2061, 34736, 1, 2,
+                2600, 34737, 5, 0, // clef ASCII (nom de GCS) : ignoree mais parseable
+        };
+        byte[] tiff = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
+                32767, keys, d, 0.001, 2.0, 49.0);
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
+        assertEquals(32767, ci.crsCode);
+        assertEquals(Integer.valueOf(2), ci.customCrs.key(CustomCrs.KEY_MODEL_TYPE));
+        assertEquals(6378249.2, ci.customCrs.dbl(CustomCrs.KEY_GEOG_SEMI_MAJOR), 1e-9);
+        assertEquals(0.0, ci.customCrs.dbl(CustomCrs.KEY_GEOG_PRIME_MERIDIAN), 1e-12);
     }
 }

@@ -38,6 +38,7 @@ public final class TiffParser {
     public static final int TAG_MODEL_TIEPOINT = 33922;
     public static final int TAG_GEO_KEY_DIRECTORY = 34735;
     public static final int TAG_GEO_DOUBLE_PARAMS = 34736;
+    public static final int TAG_GEO_ASCII_PARAMS = 34737;
     public static final int TAG_GDAL_METADATA = 65077;
     public static final int TAG_GDAL_NODATA = 42113;
 
@@ -321,9 +322,14 @@ public final class TiffParser {
         double originY = tie[4] + tie[1] * scaleY;
 
         int crs = crsFromGeoKeys(geo);
+        CustomCrs custom = null;
+        if (crs == 0 || crs == CustomCrs.USER_DEFINED) {
+            // code absent ou "user-defined" : les clefs GeoTIFF decrivent le systeme
+            custom = customCrsFromGeoKeys(geo);
+        }
         String noData = geo.entry(TAG_GDAL_NODATA) == null ? null : geo.entry(TAG_GDAL_NODATA).ascii;
 
-        return new CogInfo(levels, crs, originX, originY, scaleX, scaleY, noData);
+        return new CogInfo(levels, crs, custom, originX, originY, scaleX, scaleY, noData);
     }
 
     private static CogInfo.Level toLevel(Ifd ifd, int index, boolean be) throws IOException {
@@ -412,6 +418,31 @@ public final class TiffParser {
             return values.getOrDefault(2048, 0);
         }
         return 0;
+    }
+
+    /**
+     * Extrait les GeoKeys bruts d'un systeme "user-defined" (code 32767) :
+     * entries SHORT du repertoire 34735, parametres DOUBLE de la balise 34736
+     * (referonces par indice depuis le champ valeur des clefs) et citation
+     * ASCII 34737. Retourne null si aucun repertoire GeoKeys n'est present.
+     */
+    static CustomCrs customCrsFromGeoKeys(Ifd geo) {
+        long[] keys = geo.getLongs(TAG_GEO_KEY_DIRECTORY);
+        if (keys == null || keys.length < 4) {
+            return null;
+        }
+        int n = (int) keys[3];
+        List<CustomCrs.Key> out = new ArrayList<>();
+        for (int i = 0; i < n && 4 + 4 * i + 3 < keys.length; i++) {
+            out.add(new CustomCrs.Key((int) keys[4 + 4 * i], (int) keys[4 + 4 * i + 1],
+                    (int) keys[4 + 4 * i + 2], (int) keys[4 + 4 * i + 3]));
+        }
+        IfdEntry dbl = geo.entry(TAG_GEO_DOUBLE_PARAMS);
+        double[] doubles = dbl == null ? new double[0]
+                : (dbl.doubles != null ? dbl.doubles : new double[0]);
+        IfdEntry ascii = geo.entry(TAG_GEO_ASCII_PARAMS);
+        String citation = ascii == null ? null : ascii.ascii;
+        return new CustomCrs(out.toArray(new CustomCrs.Key[0]), doubles, citation);
     }
 
     private static int readU16(byte[] b, int off, boolean be) {

@@ -21,7 +21,7 @@ public final class TransverseMercator implements Projection {
         this.lat0 = Math.toRadians(lat0);
         this.falseEasting = falseEasting;
         this.falseNorthing = falseNorthing;
-        this.m0 = meridianArc(lat0);
+        this.m0 = meridianArc(this.lat0);
     }
 
     // Coefficients du developpement de l'arc de meridien (Snyder 3-21)

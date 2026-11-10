@@ -10,18 +10,33 @@ public final class LambertConformalConic2SP implements Projection {
     private final int epsg;
     private final Ellipsoid ell;
     private final double lat1, lat2, lat0, lon0, falseEasting, falseNorthing;
-    private final double n, bigF, rho0;
+    private final double n, bigF, rho0, k0;
 
-    public LambertConformalConic2SP(int epsg, Ellipsoid ell, double stdPar1, double stdPar2,
-                                    double lat0, double lon0, double falseEasting, double falseNorthing) {
+    public LambertConformalConic2SP(int epsg, Ellipsoid ell, double stdPar1Deg, double stdPar2Deg,
+                                    double lat0Deg, double lon0Deg, double fe, double fn) {
+        this(epsg, ell, stdPar1Deg, stdPar2Deg, lat0Deg, lon0Deg, fe, fn, null);
+    }
+
+    /**
+     * @param k0AtLat0 facteur d'echelle a lat0 ; null = 1.0, convention GeoTIFF/PROJ
+     * ou le facteur n'est porte que s'il est explicite (GeoKey 3092). Comme PROJ,
+     * k0 s'applique a tout le rayon rho : le point (lat0, lon0) tombe exactement
+     * sur (fe, fn) et la scale locale a lat0 vaut k0 (verifie contre GDAL).
+     * Les deux paralleles d'entree/sortie peuvent etre egaux (Lambert 1SP).
+     * Noms de parametres explicites ("Deg") : eviter toute confusion avec les
+     * champs en radians (piege de portee dans les constructeurs, cf. AGENTS.md).
+     */
+    public LambertConformalConic2SP(int epsg, Ellipsoid ell, double stdPar1Deg, double stdPar2Deg,
+                                    double lat0Deg, double lon0Deg, double fe, double fn,
+                                    Double k0AtLat0) {
         this.epsg = epsg;
         this.ell = ell;
-        this.lat1 = Math.toRadians(stdPar1);
-        this.lat2 = Math.toRadians(stdPar2);
-        this.lat0 = Math.toRadians(lat0);
-        this.lon0 = Math.toRadians(lon0);
-        this.falseEasting = falseEasting;
-        this.falseNorthing = falseNorthing;
+        this.lat1 = Math.toRadians(stdPar1Deg);
+        this.lat2 = Math.toRadians(stdPar2Deg);
+        this.lat0 = Math.toRadians(lat0Deg);
+        this.lon0 = Math.toRadians(lon0Deg);
+        this.falseEasting = fe;
+        this.falseNorthing = fn;
         double m1 = m(lat1);
         double m2 = m(lat2);
         double t1 = t(lat1);
@@ -32,7 +47,8 @@ public final class LambertConformalConic2SP implements Projection {
             this.n = Math.log(m1 / m2) / Math.log(t1 / t2);
         }
         this.bigF = m1 / (n * Math.pow(t1, n));
-        this.rho0 = ell.semiMajorAxis * bigF * Math.pow(t(this.lat0), n);
+        this.k0 = k0AtLat0 != null ? k0AtLat0 : 1.0;
+        this.rho0 = ell.semiMajorAxis * bigF * Math.pow(t(lat0), n) * k0;
     }
 
     private double m(double phi) {
@@ -51,7 +67,7 @@ public final class LambertConformalConic2SP implements Projection {
     public double[] project(double lat, double lon) {
         double phi = Math.toRadians(lat);
         double theta = n * (Math.toRadians(lon) - lon0);
-        double rho = ell.semiMajorAxis * bigF * Math.pow(t(phi), n);
+        double rho = ell.semiMajorAxis * bigF * Math.pow(t(phi), n) * k0;
         double x = falseEasting + rho * Math.sin(theta);
         double y = falseNorthing + rho0 - rho * Math.cos(theta);
         return new double[]{x, y};
@@ -63,7 +79,7 @@ public final class LambertConformalConic2SP implements Projection {
         double dy = rho0 - (y - falseNorthing);
         double rho = Math.copySign(Math.hypot(dx, dy), n);
         double theta = Math.atan2(Math.copySign(1, n) * dx, dy);
-        double tp = Math.pow(rho / (ell.semiMajorAxis * bigF), 1 / n);
+        double tp = Math.pow(rho / (k0 * ell.semiMajorAxis * bigF), 1 / n);
         // inversion de t(phi) : point fixe de Snyder, convergence rapide
         double phi = Math.PI / 2 - 2 * Math.atan(tp);
         double e = ell.e;

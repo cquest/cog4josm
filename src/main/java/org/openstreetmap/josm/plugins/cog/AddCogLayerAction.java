@@ -43,11 +43,20 @@ public class AddCogLayerAction extends JosmAction {
         try {
             reader = CogReader.open(url);
             CogInfo info = reader.info();
-            if (!org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)) {
+            org.openstreetmap.josm.plugins.cog.crs.Projection proj = resolveProjection(info);
+            if (proj == null) {
+                String why = info.crsCode == 0 || info.crsCode == org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED
+                        ? tryCustom(info)
+                        : (org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)
+                                ? "projection supportede mais resolution echouee"
+                                : "EPSG:" + info.crsCode + " inconnu du registre");
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                        tr("Projection EPSG:{0} non supportee. Systemes pris en charge : "
-                                + "EPSG:4326, EPSG:3857, fuseaux UTM WGS84 (32601-32660, 32701-32760) "
-                                + "et EPSG:2154 (Lambert-93).", info.crsCode),
+                        tr("Systeme de reference du COG non supporte") + " (" + info.crsDescription() + ").\n"
+                                + "Raison : " + why + "\n\n"
+                                + tr("Systemes pris en charge : EPSG:4326, EPSG:3857, "
+                                        + "fuseaux UTM WGS84 (32601-32660, 32701-32760), EPSG:2154 (Lambert-93), "
+                                        + "et systemes GeoTIFF « user-defined » a parametres explicites "
+                                        + "(geographique, transverse de Mercator, conique conforme de Lambert)."),
                         tr("Unsupported projection"), JOptionPane.WARNING_MESSAGE);
                 reader.close();
                 return;
@@ -62,7 +71,7 @@ public class AddCogLayerAction extends JosmAction {
             MainApplication.getLayerManager().addLayer(layer);
             // differe le zoom : le cadre de carte peut etre en cours de creation
             // (taille nulle) juste apres addLayer.
-            final org.openstreetmap.josm.data.Bounds zoomBounds = latLonBounds(info);
+            final org.openstreetmap.josm.data.Bounds zoomBounds = latLonBounds(info, proj);
             javax.swing.Timer zoomTimer = new javax.swing.Timer(700, e2 -> {
                 if (MainApplication.getMap() != null) {
                     MainApplication.getMap().mapView.zoomTo(zoomBounds);
@@ -88,21 +97,52 @@ public class AddCogLayerAction extends JosmAction {
     }
 
     /**
+     * Projection du systeme de reference declare par le COG (code EPSG
+     * enregistre ou GeoKeys "user-defined"), null si non resolvable.
+     */
+    static org.openstreetmap.josm.plugins.cog.crs.Projection resolveProjection(CogInfo info) {
+        if (info.crsCode != 0 && info.crsCode != org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED) {
+            return org.openstreetmap.josm.plugins.cog.crs.Crs.forEpsg(info.crsCode);
+        }
+        try {
+            return org.openstreetmap.josm.plugins.cog.crs.Crs.fromCustom(info.customCrs);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** Motif d'echec de resolution du systeme custom (pour le message d'erreur). */
+    private static String tryCustom(CogInfo info) {
+        if (info.customCrs == null) {
+            return "aucun GeoKey de systeme de reference exploitable";
+        }
+        try {
+            org.openstreetmap.josm.plugins.cog.crs.Crs.fromCustom(info.customCrs);
+            return "resolu au second essai (incoherent)";
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+    }
+
+    /**
      * Emprise geographique (lat/lon) du COG : la boite de ses coordonnees modeles
      * est echantillonnee (coins + milieux des bords) puis deprojetee, ce qui suit
      * la courbure des meridien/paralleles pour les systemes projetes.
      */
     static org.openstreetmap.josm.data.Bounds latLonBounds(CogInfo info) {
+        return latLonBounds(info, resolveProjection(info));
+    }
+
+    static org.openstreetmap.josm.data.Bounds latLonBounds(CogInfo info,
+            org.openstreetmap.josm.plugins.cog.crs.Projection proj) {
+        if (proj == null) {
+            return new org.openstreetmap.josm.data.Bounds(-90, -180, 90, 180);
+        }
         CogInfo.Level l0 = info.level(0);
         double minX = info.originX;
         double minY = info.originY - l0.height * info.scaleY;
         double maxX = info.originX + l0.width * info.scaleX;
         double maxY = info.originY;
-        org.openstreetmap.josm.plugins.cog.crs.Projection proj =
-                org.openstreetmap.josm.plugins.cog.crs.Crs.forEpsg(info.crsCode);
-        if (proj == null) {
-            return new org.openstreetmap.josm.data.Bounds(-90, -180, 90, 180);
-        }
         double midX = (minX + maxX) / 2;
         double midY = (minY + maxY) / 2;
         double[][] pts = {

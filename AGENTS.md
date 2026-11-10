@@ -18,8 +18,12 @@ d'arrière-plan, par lectures HTTP byte-ranges uniquement.
 - V1 n'accepte que **EPSG:3857 et EPSG:4326**. Depuis la phase 2, la
   reprojection par tuile est active pour les CRS listés dans `crs/Crs`
   (4326, 3857, UTM WGS84 32601-32660 / 32701-32760, Lambert-93 2154) ;
-  tout autre CRS doit produire une erreur explicite (pas de reprojection
-  silencieuse ni de supposition de SRID).
+  depuis la phase 2.1 aussi les **GeoKeys custom (32767)** dont les
+  paramètres décrivent un modele connu (geographique, Transverse Mercator,
+  Lambert conique conforme 1SP/2SP — cf. `Crs.fromCustom`). Tout autre
+  CRS ou methode doit produire une erreur explicite (pas de reprojection
+  silencieuse ni de supposition de SRID). Pas de parsing PROJ.4/WKT :
+  seules les clefs GeoTIFF sont lues (choix assume, phase 2.2 = proj4j).
 
 ## Langue et style
 
@@ -61,7 +65,10 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
   `HttpRangeReader` (ByteSource HTTP) → `TiffParser` (IFD, GeoKeys) →
   `CogInfo` (pyramide + géoréférencement) → `CogReader` (tuiles décodées,
   cache LRU) → `CogComposer` (recomposition des tuiles OSM 256 px) et
-  `TileDecoder` (NONE/Deflate/PackBits/LZW/JPEG).
+  `TileDecoder` (NONE/Deflate/PackBits/LZW/JPEG). `CustomCrs` porte les
+  GeoKeys bruts (doubles du locator 34736 inclus) quand le SRID est 0 ou
+  32767 ; `CogTileSource` resout la projection des sa reception du
+  `CogInfo` et garde l'erreur pour l'afficher au chargement de tuile.
 - `layer/` : intégration JOSM. `CogImageryLayer` extends
   `AbstractCachedTileSourceLayer<CogTileSource>` ; `CogTileSource` est une
   source TMS sans URL (synthèse à la volée) qui **porte le `CogReader`** ;
@@ -133,6 +140,37 @@ export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
 - Series de Snyder 6e ordre : ~3 mm d'erreur a 5 degres du meridien central
   (tolerances de test elargies pour les cas hors fuseau UTM).
 
+## Pièges GeoKeys custom (phase 2.1, déjà rencontrés)
+
+- **Portee des constructeurs `crs/`** : un parametre « degres » qui porte le
+  meme nom qu'un champ en radians (`lat0`, `lon0`…) masque le champ ; les
+  projections LCC/TM etaient fausses de ce fait. Convention : parametres
+  suffixes `Deg` et `this.` explicite partout.
+- **Reconciliation 3074/3075** : GeoKey 3074 (TransformationCoordinnees) =
+  32767 chez GDAL ; le code de methode reel est en 3075. Les valeurs TM=1 et
+  LCC2SP=8 sont partagees entre les deux tables ; seuls les codes Lambert 1SP
+  different (3074=9 vs 3075=14). Albers (3075=11) N'EST PAS supporte : doit
+  etre refuse explicitement (fixture `custom_albers_cog.tif`).
+- **Convention PROJ du facteur d'echelle Lambert** : GeoKey 3092 (k0) absent
+  vaut 1,0 ; quand il est present, PROJ l'applique a TOUT le rayon rho
+  (pas seulement rho0), donc (lat0,lon0) tombe exactement sur (FE,FN) et la
+  scale locale a lat0 vaut k0. `LambertConformalConic2SP` fait de meme
+  (verifie contre GDAL : 1SP k_0=0.99987731, (45N,5E) -> (1000000,2000000)).
+- **Ellipsoide** : priorite aux doubles 2057 (axe) / 2059 (aplatissement),
+  sinon code 2056 (table `Ellipsoid.forGeoKeyCode`) ; premier meridien 2061
+  (double) supporte en geographique uniquement ; unites lineaires 3076 !=
+  9001 via l'adaptateur `Crs$Scaled` ; unites angulaires != degres refus.
+- **Écriveur de test `TestTiffWriter`** : `geoBlockSize()` doit rendre la
+  taille EXACTEMENT ecrite par `writeExt` (72 + 2*nKeys + 8*nDbl +
+  CITATION+1 en custom, 96 sinon) — un ecart de 7 octets decales tous les
+  TileOffsets (symptome : « Taille de tuile attendue N octets, recu 0 »).
+  Les clefs GeoKeys sont des `int[]` (le locator 34736 depasse short signe)
+  et `write()` verifie que l'en-tete NumberOfKeys correspond exactement aux
+  entrees presentes.
+- Les COG ecrits par GDAL en custom peuvent avoir 2061=0 meme si lon_0 etait
+  non nul dans la chaine PROJ generatrice : se fier aux GeoKeys lus, pas a
+  l'intention de generation (cas du fixture longlat).
+
 ## Exemple COG de référence
 
 `cog-paris-3857.tif` (racine, 1,4 Mo, EPSG:3857) et `cog-paris-l93.tif`
@@ -151,6 +189,25 @@ gdalwarp -t_srs EPSG:2154 -te_srs EPSG:4326 -te 2.25 48.80 2.45 48.92 \
 
 C'est le seul format COG « réaliste » couvert par les tests (JPEG à tables
 externes) ; les COG rasterio (tables dans le flux) sont aussi acceptés.
+
+### Fixtures « GeoKeys custom » (phase 2.1)
+
+`custom_lcc_cog.tif`, `custom_tmerc_cog.tif`, `custom_longlat_cog.tif`
+(racine, générés par GDAL, donc GeoKeys 32767 + doubles 34736 réalistes) et
+`custom_albers_cog.tif` (methode 3075=11, doit etre **refuse**). Ancres de
+reference GDAL dans `CogCustomWarpTest`/`CustomCrsTest`. Régénération :
+
+```sh
+gdalwarp -q -of GTiff -tr 100 100 -t_srs "+proj=lcc +lat_1=44 +lat_2=49 +lat_0=46.5 +lon_0=3 +k_0=0.9999 +x_0=700000 +y_0=6600000 +ellps=GRS80 +units=m +no_defs" \
+  -te 645000 6855000 650000 6860000 cog-paris-l93.tif custom_lcc.tif
+gdalwarp -q -of GTiff -tr 100 100 -t_srs "+proj=tmerc +lat_0=48.85 +lon_0=2.35 +k=0.99986521 +x_0=600000 +y_0=2200000 +ellps=clrk80ign +units=m +no_defs" \
+  -te 598000 2198000 602000 2202000 cog-paris-l93.tif custom_tmerc.tif
+gdalwarp -q -of GTiff -t_srs "+proj=longlat +ellps=clrk80ign +no_defs" cog-paris-l93.tif custom_longlat.tif
+gdalwarp -q -of GTiff -tr 100 100 -t_srs "+proj=aea +lat_1=42 +lat_2=44 +lat_0=46 +lon_0=3 +x_0=1000000 +y_0=6000000 +ellps=GRS80 +units=m +no_defs" \
+  cog-paris-l93.tif custom_albers.tif
+for f in custom_lcc custom_tmerc custom_longlat custom_albers; do
+  gdal_translate -q -of COG -co COMPRESS=DEFLATE $f.tif ${f}_cog.tif; done
+```
 
 ## Tests GUI bout en bout (cette machine, optionnel)
 
@@ -174,5 +231,10 @@ dernière étape. Raccourcis connus :
 
 Phase 2 (faite) : reprojection par tuile (UTM, Lambert-93) via les formules
 `crs/` maison (pas de PRJ complet).
+Phase 2.1 (faite) : GeoKeys custom 32767 maps sur les classes `crs/`
+existantes (`Crs.fromCustom`), sans nouvelle mathematique de projection.
+Phase 2.2 (envisagee) : backend proj4j pour les modeles non couverts
+(Albers, Mercator oblique, datum non-WGS84…) — casserait la contreainte
+« aucune dependance », a arbitrer.
 Phase 3 : Publication sur la liste des plugins JOSM (nécessite `Plugin-Mainversion` à jour et
 javadoc/checkstyle JOSM si intégration upstream).

@@ -34,6 +34,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |
 | Couche JOSM fonctionnelle (menu Imagery) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
+| GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
 | Panneau STAC (Panoramax) | ⏳ phase 3 |
 
 ## Systèmes de coordonnées pris en charge
@@ -45,6 +46,20 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | 32601–32660 | UTM WGS84 nord (zone N) |
 | 32701–32760 | UTM WGS84 sud (zone N) |
 | 2154 | RGF97 / Lambert-93 (France métropolitaine) |
+
+En plus des SRID EPSG enregistrés, le plugin comprend les GeoKeys
+« custom » (valeur 32767, ce que GDAL écrit pour tout système décrit par
+ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
+
+| Méthode (GeoKey 3075) | Système pris en charge |
+|---|---|
+| 1 | Transverse de Mercator (ellipsoïde et paramètres libres) |
+| 8 | Conique conforme de Lambert 1SP/2SP |
+| — | Systématique (géographique), ellipsoïde + premier méridien |
+
+Tout autre méthode (Albers 11, Mercator oblique…), unité angulaire non
+degré ou paramètre manquant est **refusé avec un message d'erreur
+explicite** — jamais reprojeté silencieusement.
 
 Les projections sont calculées en interne (séries de Snyder, précision
 sub-millimétrique en avant, validée contre GDAL/PROJ). Les datums non-WGS84

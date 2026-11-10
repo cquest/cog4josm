@@ -100,8 +100,14 @@ public final class CogInfo {
     }
 
     public final List<Level> levels;
-    /** Code EPSG (0 = inconnu/user-defined). */
+    /** Code EPSG (0 = inconnu/user-defined ; voir alors {@link #customCrs}). */
     public final int crsCode;
+    /**
+     * Systemes de reference "user-defined" (GeoKeys 32767) lorsque le code
+     * EPSG est absent, null sinon. null egalement si le fichier ne declare
+     * aucun systeme exploitable.
+     */
+    public final CustomCrs customCrs;
     /** Coordonnees modeles du coin superieur-gauche (coin Nord-Ouest). */
     public final double originX;
     public final double originY;
@@ -112,8 +118,14 @@ public final class CogInfo {
 
     CogInfo(List<Level> levels, int crsCode, double originX, double originY,
             double scaleX, double scaleY, String noData) {
+        this(levels, crsCode, null, originX, originY, scaleX, scaleY, noData);
+    }
+
+    CogInfo(List<Level> levels, int crsCode, CustomCrs customCrs, double originX, double originY,
+            double scaleX, double scaleY, String noData) {
         this.levels = List.copyOf(levels);
         this.crsCode = crsCode;
+        this.customCrs = customCrs;
         this.originX = originX;
         this.originY = originY;
         this.scaleX = scaleX;
@@ -150,6 +162,19 @@ public final class CogInfo {
         return best;
     }
 
+    /** Description lisible du systeme de reference (pour messages et journaux). */
+    public String crsDescription() {
+        if (customCrs != null) {
+            Integer ct = customCrs.key(CustomCrs.KEY_PROJ_COORD_TRANS);
+            Integer mc = customCrs.key(CustomCrs.KEY_PROJ_METHOD_CODE);
+            return "systeme custom (3074=" + ct + ", 3075=" + mc + ")";
+        }
+        if (crsCode != 0) {
+            return "EPSG:" + crsCode;
+        }
+        return "systeme inconnu";
+    }
+
     public double extentMinX() {
         return originX;
     }
@@ -171,8 +196,8 @@ public final class CogInfo {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format(Locale.ROOT, "COG : %d IFD(s), EPSG:%d, origine=(%.6f, %.6f), pixel=(%.9f, %.9f)%n",
-                levels.size(), crsCode, originX, originY, scaleX, scaleY));
+        sb.append(String.format(Locale.ROOT, "COG : %d IFD(s), %s, origine=(%.6f, %.6f), pixel=(%.9f, %.9f)%n",
+                levels.size(), crsDescription(), originX, originY, scaleX, scaleY));
         sb.append(String.format(Locale.ROOT, "emprise : [%.6f, %.6f, %.6f, %.6f]%n",
                 extentMinX(), extentMinY(), extentMaxX(), extentMaxY()));
         for (Level l : levels) {

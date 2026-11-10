@@ -62,7 +62,7 @@ final class CogTileLoaderJob implements TileJob {
             int size = tile.getSource().getTileSize();
             Bounds bbox = MercatorTiles.tileBounds(tile.getZoom(), tile.getXtile(), tile.getYtile());
             BufferedImage img;
-            if (info.crsCode == 4326) {
+            if (cts.isGeographicDegrees()) {
                 bbox = new Bounds(MercatorTiles.xToLon(bbox.minX()), MercatorTiles.yToLat(bbox.minY()),
                         MercatorTiles.xToLon(bbox.maxX()), MercatorTiles.yToLat(bbox.maxY()));
                 img = CogComposer.compose(reader, bbox, size);
@@ -72,7 +72,8 @@ final class CogTileLoaderJob implements TileJob {
                 org.openstreetmap.josm.plugins.cog.crs.Projection proj = cts.getProjection();
                 if (proj == null) {
                     tile.finishLoading();
-                    tile.setError("EPSG:" + info.crsCode + " non supporte");
+                    tile.setError(cts.getCrsError() == null
+                            ? info.crsDescription() + " non supporte" : cts.getCrsError());
                     loader.listener().tileLoadingFinished(tile, false);
                     return;
                 }
