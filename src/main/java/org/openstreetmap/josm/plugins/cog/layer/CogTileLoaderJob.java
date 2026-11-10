@@ -52,7 +52,12 @@ final class CogTileLoaderJob implements TileJob {
     public void run() {
         boolean success = false;
         try {
-            CogReader reader = loader.reader();
+            if (!(tile.getSource() instanceof CogTileSource cts)) {
+                Logging.warn("josm-cog : source de tuile etrangere {0}",
+                        tile.getSource() == null ? "null" : tile.getSource().getClass().getName());
+                return;
+            }
+            CogReader reader = cts.getReader();
             CogInfo info = reader.info();
             int size = tile.getSource().getTileSize();
             Bounds bbox = MercatorTiles.tileBounds(tile.getZoom(), tile.getXtile(), tile.getYtile());

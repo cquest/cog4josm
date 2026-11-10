@@ -14,6 +14,7 @@ import org.openstreetmap.gui.jmapviewer.interfaces.IProjected;
 import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.plugins.cog.reader.CogInfo;
+import org.openstreetmap.josm.plugins.cog.reader.CogReader;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 
 /**
@@ -26,13 +27,15 @@ public class CogTileSource extends AbstractTMSTileSource {
     private static final int MAX_ZOOM = 24;
 
     private final CogInfo cogInfo;
+    private final CogReader reader;
     private final OsmMercator mercator;
     private final int minZoom;
     private final int maxZoom;
 
-    public CogTileSource(ImageryInfo info, CogInfo cog) {
+    public CogTileSource(ImageryInfo info, CogReader reader) {
         super(info);
-        this.cogInfo = cog;
+        this.reader = reader;
+        this.cogInfo = reader.info();
         info.setTileSize(256);
         this.mercator = new OsmMercator(info.getTileSize());
         this.minZoom = 0;
@@ -41,6 +44,11 @@ public class CogTileSource extends AbstractTMSTileSource {
 
     public CogInfo getCogInfo() {
         return cogInfo;
+    }
+
+    /** Lecteur COG attache a cette source (utilisé par CogTileLoaderJob). */
+    public CogReader getReader() {
+        return reader;
     }
 
     @Override

@@ -63,3 +63,11 @@ tasks.register('spike', JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'org.openstreetmap.josm.plugins.cog.reader.CogDumpCli'
 }
+
+// Sert le COG d exemple (EPSG:3857) avec byte-ranges : ./gradlew serve-cog --args="sample 8765"
+tasks.register('serve-cog', JavaExec) {
+    group = 'application'
+    description = 'Serviteur HTTP statique avec byte-ranges pour tests locaux de COG'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.openstreetmap.josm.plugins.cog.tools.CogFileServer'
+}

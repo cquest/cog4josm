@@ -27,7 +27,7 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
     public CogImageryLayer(ImageryInfo info, CogReader reader) {
         super(info);
         this.reader = reader;
-        this.tileSource = new CogTileSource(info, reader.info());
+        this.tileSource = new CogTileSource(info, reader);
     }
 
     @Override
@@ -54,7 +54,7 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
     @Override
     protected synchronized TileLoaderFactory getTileLoaderFactory() {
         return (listener, headers, minimumExpiry) -> {
-            cogLoader = new CogTileLoader(listener, reader);
+            cogLoader = new CogTileLoader(listener);
             return cogLoader;
         };
     }
