@@ -41,9 +41,13 @@ jar {
     manifest {
         def buildDate = new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date())
         attributes(
-            'Plugin-Main-Class': 'org.openstreetmap.josm.plugins.cog.CogPlugin',
-            'Plugin-Main-Version': '19678',
-            'Plugin-Min-Version': '19600',
+            // IMPORTANT : noms d'attributs officiels JOSM (Plugin-Class, Plugin-Mainversion,
+            // Plugin-Minimum-Java-Version). Les variantes hyphenees sont ignorees par JOSM.
+            'Plugin-Class': 'org.openstreetmap.josm.plugins.cog.CogPlugin',
+            'Plugin-Mainversion': '19678',
+            'Plugin-Minimum-Java-Version': '17',
+            'Plugin-Stage': '50',
+            'Plugin-Version': project.version,
             'Plugin-Description': 'Affiche des images COG (Cloud Optimized GeoTIFF) distantes comme couches d\'arriere-plan, lues par HTTP byte-ranges',
             'Plugin-Date': buildDate,
             'Implementation-Title': 'cog',
