@@ -289,4 +289,18 @@ class TiffParserTest {
             }
         }
     }
+
+    @Test
+    void rejectsAbsurdTileSize() throws IOException {
+        // a tile of 8192x8192 would make decoded rasters gigantic: bounded
+        byte[] file = rawTiff(
+                new RawEntry(256, 4, 1, 64, null),
+                new RawEntry(257, 4, 1, 64, null),
+                new RawEntry(322, 4, 1, 8192, null),
+                new RawEntry(323, 4, 1, 8192, null),
+                new RawEntry(324, 4, 1, 0, new byte[4]),
+                new RawEntry(325, 4, 1, 0, new byte[4]));
+        IOException e = assertThrows(IOException.class, () -> TiffParser.parse(new InMemoryByteSource(file)));
+        assertTrue(e.getMessage().contains("tile size"), e.getMessage());
+    }
 }

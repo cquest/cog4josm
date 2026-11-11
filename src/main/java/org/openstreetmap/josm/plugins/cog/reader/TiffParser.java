@@ -69,6 +69,13 @@ public final class TiffParser {
      */
     private static final long VALUE_MAX_BLOCK = 4L << 20;
 
+    /**
+     * Maximum supported native tile dimension: keeps decoded rasters bounded
+     * (4096x4096 RGBA 8-bit = 64 MB, the {@code TileDecoder} raster cap); real
+     * COGs use 128-1024 px blocks.
+     */
+    private static final int MAX_TILE_DIM = 4096;
+
     private TiffParser() {
     }
 
@@ -436,6 +443,10 @@ public final class TiffParser {
         // numX and numY are each below 2^31, their product below 2^62).
         long numX = ((long) width + tw - 1) / tw;
         long numY = ((long) height + th - 1) / th;
+        if (tw > MAX_TILE_DIM || th > MAX_TILE_DIM) {
+            throw new IOException("Declared tile size " + tw + "x" + th + " exceeds the maximum supported "
+                    + MAX_TILE_DIM + "x" + MAX_TILE_DIM + " (not a COG, or corrupted)");
+        }
         if (numX * numY > offsets.length) {
             throw new IOException("TileOffsets/TileByteCounts too short for the declared "
                     + width + "x" + height + " image (" + tw + "x" + th + " tiles): "
@@ -445,6 +456,9 @@ public final class TiffParser {
             throw new IOException("PlanarConfiguration=2 not supported");
         }
         int samples = (int) ifd.getLong(TAG_SAMPLES_PER_PIXEL, 1);
+        if (samples <= 0 || samples > 64) {
+            throw new IOException("Unsupported SamplesPerPixel=" + samples);
+        }
         long[] bps = ifd.getLongs(TAG_BITS_PER_SAMPLE);
         int[] bits = new int[samples];
         Arrays.fill(bits, 8);

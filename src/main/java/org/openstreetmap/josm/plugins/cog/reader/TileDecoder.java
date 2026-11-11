@@ -4,11 +4,13 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.zip.DataFormatException;
 import java.util.zip.Inflater;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
 import java.awt.image.BufferedImage;
 
 /**
@@ -22,28 +24,43 @@ public final class TileDecoder {
     private TileDecoder() {
     }
 
+    /**
+     * Absolute cap on the decompressed raster of one tile (guard against
+     * compression bombs: tiny stored block, gigantic declared output).
+     */
+    private static final long MAX_RASTER_BYTES = 64L << 20;
+
+    /**
+     * Expected raster size of one full tile in bytes (TIFF pads edge tiles
+     * to the full tile size); samplesPerPixel already includes the extra
+     * (alpha) samples. Capped by {@link #MAX_RASTER_BYTES}.
+     */
+    static long expectedRasterBytes(CogInfo.Level level) {
+        int b = level.bitsPerSample.length > 0 ? level.bitsPerSample[0] : 0;
+        long bytesPerSample = (b + 7) / 8L;
+        long total = (long) level.tileWidth * level.tileHeight * level.samplesPerPixel * bytesPerSample;
+        return Math.min(Math.max(total, 0), MAX_RASTER_BYTES);
+    }
+
     public static BufferedImage decode(CogInfo.Level level, byte[] raw) throws IOException {
         if (raw.length >= 2 && (raw[0] & 0xFF) == 0xFF && (raw[1] & 0xD8) == 0xD8) {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(withJpegTables(raw, level.jpegTables)));
-            if (img == null) {
-                throw new IOException("Cannot decode JPEG tile (the JPEGTables may be missing)");
-            }
-            return img;
+            return decodeJpeg(withJpegTables(raw, level.jpegTables), level);
         }
+        long maxPx = expectedRasterBytes(level);
         byte[] px;
         switch (level.compression) {
             case 1:
                 px = raw;
                 break;
             case 32773:
-                px = packBitsDecode(raw);
+                px = packBitsDecode(raw, maxPx);
                 break;
             case 5:
-                px = lzwDecode(raw);
+                px = lzwDecode(raw, maxPx);
                 break;
             case 8:
             case 32946:
-                px = inflate(raw, false);
+                px = inflate(raw, false, maxPx);
                 break;
             default:
                 throw new IOException("TIFF compression " + level.compression + " not supported");
@@ -52,6 +69,45 @@ public final class TileDecoder {
             applyHorizontalPredictor(px, level);
         }
         return toImage(px, level);
+    }
+
+    // ---------------------------------------------------------------- JPEG
+
+    /**
+     * Decodes a JPEG tile through ImageIO, but checks the dimensions declared
+     * by the stream (SOF segment) BEFORE the raster is allocated: a hostile
+     * stream declaring 50000x50000 inside a few KB would otherwise exhaust
+     * the heap (decompression bomb). COG edge tiles may be smaller than
+     * tileWidth/tileHeight, never bigger.
+     */
+    private static BufferedImage decodeJpeg(byte[] stream, CogInfo.Level level) throws IOException {
+        try (javax.imageio.stream.ImageInputStream iis =
+                     ImageIO.createImageInputStream(new ByteArrayInputStream(stream))) {
+            if (iis == null) {
+                throw new IOException("Cannot read JPEG tile stream");
+            }
+            java.util.Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
+            if (!readers.hasNext()) {
+                throw new IOException("No JPEG reader for this tile");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(iis);
+                int w = reader.getWidth(0);
+                int h = reader.getHeight(0);
+                if (w <= 0 || h <= 0 || w > level.tileWidth || h > level.tileHeight) {
+                    throw new IOException("JPEG tile of " + w + "x" + h + " exceeds the declared tile size "
+                            + level.tileWidth + "x" + level.tileHeight);
+                }
+                BufferedImage img = reader.read(0);
+                if (img == null) {
+                    throw new IOException("Cannot decode JPEG tile (the JPEGTables may be missing)");
+                }
+                return img;
+            } finally {
+                reader.dispose();
+            }
+        }
     }
 
     // ---------------------------------------------------------------- JPEG tables
@@ -103,10 +159,11 @@ public final class TileDecoder {
 
     // ---------------------------------------------------------------- inflate
 
-    private static byte[] inflate(byte[] raw, boolean rawDeflate) throws IOException {
+    private static byte[] inflate(byte[] raw, boolean rawDeflate, long maxPx) throws IOException {
         Inflater in = new Inflater(rawDeflate);
         in.setInput(raw);
-        ByteArrayOutputStream out = new ByteArrayOutputStream(Math.max(raw.length * 4, 1024));
+        ByteArrayOutputStream out =
+                new ByteArrayOutputStream((int) Math.min(Math.max((long) raw.length * 4, 1024), maxPx));
         byte[] buf = new byte[16384];
         try {
             while (!in.finished()) {
@@ -117,11 +174,15 @@ public final class TileDecoder {
                     }
                 }
                 out.write(buf, 0, n);
+                if (out.size() > maxPx) {
+                    throw new IOException("Inflated tile exceeds the expected raster size "
+                            + maxPx + " bytes (compression bomb?)");
+                }
             }
         } catch (DataFormatException e) {
             if (!rawDeflate) {
                 // some writers produce "raw" deflate without a zlib header
-                return inflate(raw, true);
+                return inflate(raw, true, maxPx);
             }
             throw new IOException("Invalid deflate", e);
         } finally {
@@ -132,8 +193,9 @@ public final class TileDecoder {
 
     // ---------------------------------------------------------------- packbits
 
-    static byte[] packBitsDecode(byte[] in) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(in.length * 2);
+    static byte[] packBitsDecode(byte[] in, long maxPx) throws IOException {
+        ByteArrayOutputStream out =
+                new ByteArrayOutputStream((int) Math.min((long) in.length * 2, maxPx));
         int i = 0;
         while (i < in.length) {
             int n = in[i++];
@@ -154,17 +216,22 @@ public final class TileDecoder {
                 }
                 i++;
             }
+            if (out.size() > maxPx) {
+                throw new IOException("Unpacked tile exceeds the expected raster size "
+                        + maxPx + " bytes (compression bomb?)");
+            }
         }
         return out.toByteArray();
     }
 
     // ---------------------------------------------------------------- lzw
 
-    static byte[] lzwDecode(byte[] in) throws IOException {
+    static byte[] lzwDecode(byte[] in, long maxPx) throws IOException {
         final int clear = 256;
         final int end = 257;
         List<byte[]> dict = newBaseDict();
-        ByteArrayOutputStream out = new ByteArrayOutputStream(in.length * 4);
+        ByteArrayOutputStream out =
+                new ByteArrayOutputStream((int) Math.min((long) in.length * 4, maxPx));
         int bits = 9;
         int next = 258;
         int bitPos = 0;
@@ -196,6 +263,10 @@ public final class TileDecoder {
                 throw new IOException("Invalid LZW code: " + code);
             }
             out.writeBytes(entry);
+            if (out.size() > maxPx) {
+                throw new IOException("LZW-expanded tile exceeds the expected raster size "
+                        + maxPx + " bytes (compression bomb?)");
+            }
             if (prev != null) {
                 byte[] added = new byte[prev.length + 1];
                 System.arraycopy(prev, 0, added, 0, prev.length);
@@ -317,11 +388,15 @@ public final class TileDecoder {
         int spp = level.samplesPerPixel;
         boolean hasAlpha = level.extraSamples.length > 0;
         int bytesPerSample = b / 8;
-        long needed = (long) w * h * (spp + (hasAlpha ? 1 : 0)) * bytesPerSample;
-        if ((long) px.length < (long) w * h * spp * bytesPerSample) {
+        // TIFF convention: SamplesPerPixel ALREADY includes the extra (alpha)
+        // samples (GDAL writes RGBA as spp=4 + ExtraSamples): the stride is
+        // simply spp * bytes, and the size check must use it (never ignore the
+        // alpha channel, never double-count it).
+        int stride = spp * bytesPerSample;
+        long needed = (long) w * h * stride;
+        if (stride <= 0 || (long) px.length < needed) {
             throw new IOException("Expected tile size " + needed + " bytes, received " + px.length);
         }
-        int stride = (spp + (hasAlpha ? 1 : 0)) * bytesPerSample;
 
         if (b == 16 && spp == 1 && !hasAlpha) {
             if (level.photometric != 1 && level.photometric != 0) {
@@ -377,14 +452,16 @@ public final class TileDecoder {
             }
             case 2: {
                 if (spp == 3 || (spp == 4 && hasAlpha)) {
-                    BufferedImage img = new BufferedImage(w, h, hasAlpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+                    // the 4th sample is the alpha only when 4 samples are stored
+                    boolean alpha = spp == 4;
+                    BufferedImage img = new BufferedImage(w, h, alpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
                     for (int y = 0; y < h; y++) {
                         for (int x = 0; x < w; x++) {
                             int off = (y * w + x) * stride;
                             int r = px[off] & 0xFF;
                             int g = px[off + 1] & 0xFF;
                             int bl = px[off + 2] & 0xFF;
-                            int a = hasAlpha ? px[off + 3] & 0xFF : 255;
+                            int a = alpha ? px[off + 3] & 0xFF : 255;
                             img.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | bl);
                         }
                     }
