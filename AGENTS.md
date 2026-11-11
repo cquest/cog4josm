@@ -122,7 +122,7 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   cache). Measured on `test_data/cog-paris-3857.tif` over local HTTP: first
   open went from 14 requests (probe + 13 metadata) to 1 head read.
   The requested range is also echoed inside the User-Agent comment
-  (`cog4josm/0.3.0 (…; range=a-b)`) because plain access logs do not
+  (`cog4josm/0.4.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
   Each tile fetch window is padded by a speculative ring of one source
   tile (`RING_TILES`, phase 2.7 E1: ring tiles join the decoded-tile

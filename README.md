@@ -64,7 +64,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   plugin embeds and downloads no EPSG database of its own; models the
   plugin cannot compute are refused.
 
-## Status (v0.3)
+## Status (v0.4)
 
 | Feature | Status |
 |---|---|

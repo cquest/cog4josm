@@ -70,7 +70,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   aucune base EPSG propre ; les modèles qu'il ne sait pas calculer sont
   refusés.
 
-## État (v0.3)
+## État (v0.4)
 
 | Fonctionnalité | État |
 |---|---|
