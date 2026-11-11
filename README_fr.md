@@ -132,6 +132,45 @@ tests unitaires). Les datums non-WGS84 (NTF, SAD69…) sont traités comme
 WGS84 : décalage possible de l'ordre de la centaine de mètres,
 acceptable pour un fond cartographique.
 
+## Structure du projet
+
+```
+src/main/java/org/openstreetmap/josm/plugins/cog/
+├── CogPlugin, AddCogLayerAction    entrée du plugin (action « ajouter un calque COG »)
+├── reader/                         lecture des COG, sans dépendance à JOSM
+│   ├── ByteSource, HttpRangeReader lecture par HTTP byte-ranges (sonde, ETag, retries)
+│   ├── TiffParser, CogInfo         parseur TIFF/BigTIFF + GeoKeys (pyramide, géoréférence)
+│   ├── RangePlanner                fusion des petites plages en requêtes par bloc
+│   ├── MetadataCache, MetadataCachingSource
+│   │                               cache LRU des seules métadonnées (validé taille/ETag)
+│   ├── TileDecoder                 décodage NONE / Deflate / PackBits / LZW / JPEG
+│   ├── CogReader, CogComposer, MercatorTiles
+│   │                               LRU de tuiles source décodées + recomposition
+│   │                               des tuiles d'affichage OSM 256 px
+│   └── CogDumpCli                  CLI autonome « spike » (affiche la pyramide d'un COG)
+├── crs/                            calculs de projection, sans dépendance à JOSM
+│   ├── Crs, Projection, Ellipsoid, Geographic,
+│   │   WebMercator, TransverseMercator,
+│   │   LambertConformalConic2SP    formules internes (longlat, mercator, tmerc, lcc)
+│   └── JosmEpsgTable               lit la table de projections embarquée par JOSM
+│                                   (le plugin n'embarque aucune base EPSG propre)
+├── tools/                          CogFileServer : serveur HTTP statique local
+│                                   avec byte-ranges (outil de test)
+└── layer/                          intégration JOSM
+    ├── CogImageryLayer             couche d'arrière-plan (couche tuiles JOSM avec cache)
+    └── CogTileSource, CogTileLoader, CogTileLoaderJob
+                                    synthèse des tuiles à la volée, cache JOSM « cog »
+
+src/test/java/…          tests JUnit (fixtures TIFF synthétisées en mémoire)
+test_data/               COG de référence (validation E2E et retours en arrière)
+dist/cog4josm.jar        binaire du plugin construit
+lib/                   josm-tested.jar (compile/test uniquement, jamais embarqué)
+```
+
+Seules les classes de premier niveau et `layer/` utilisent l'API JOSM ; `reader/`,
+`crs/` et `tools/` ne dépendent que du JDK — le lecteur fonctionne donc aussi hors
+JOSM (CLI `spike`) et peut être réutilisé tel quel.
+
 ## Construire
 
 Prérequis : un **JDK 17+ complet** (contenant `javac`), pas un simple
