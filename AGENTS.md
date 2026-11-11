@@ -483,5 +483,29 @@ and `CogReader.open` seeds the metadata cache with one speculative 32 KiB
 head read that `MetadataCache` containment lookups then serve for every
 metadata range. Measured: first open of `cog-paris-3857.tif` over HTTP
 dropped from 14 requests to 1; reopening stays at 1.
+Phase 2.7 (planned): fewer raster requests while browsing — E1: compose
+the source window with a one-full-tile margin so the neighbouring tiles
+of the same level come from the decoded-tile LRU instead of the network
+(cost: roughly +30-50% bytes); E2: at layer load, fetch the root
+overview level in one merged request when it is small (cap ~2 MiB),
+making the initial zoomed-out view and zoom-out fallbacks free.
+Measure with an HTTP-aware CacheE2E (requests per pan before/after;
+FileSource-read baseline: 13 reads for one z12 display tile).
+Phase 2.8 (planned): metadata persistence across restarts — keep
+MetadataCache blocks in the JCS "cog" region keyed by the same
+fingerprint(url+size+etag), then validate opens with a conditional
+GET (If-None-Match): a 304 costs ~0 bytes instead of re-fetching the
+32 KiB head block. Still exactly one request per open (fingerprint
+validation needs an answer); metadata only, never raster bytes
+(principle unchanged). Follow-ups for hostile layouts only: lazy
+per-level IFD parsing, or a speculative tail read (last 32 KiB) when
+the parser sees offsets outside the head block (header-tail COGs,
+tile-offset arrays bigger than the head).
+Marginal items, take only in passing: in-flight byte-range dedup
+between concurrent tile jobs (the tile LRU already covers most cases),
+one shared HttpClient across layers (connection reuse: latency only,
+no request-count change). Multi-range GET (multipart 206) stays
+rejected: uneven server support, parser complexity, and RangePlanner
+already merges what is contiguous.
 Phase 3: publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).
