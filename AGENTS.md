@@ -1,202 +1,197 @@
-# josm_cog — instructions pour agents
+# josm_cog — instructions for agents
 
-Plugin JOSM affichant des COG (Cloud Optimized GeoTIFF) distants comme couches
-d'arrière-plan, par lectures HTTP byte-ranges uniquement.
+JOSM plugin displaying remote COGs (Cloud Optimized GeoTIFF) as background
+layers, using HTTP byte-range reads only.
 
-## Principes non négociables
+## Non-negotiable principles
 
-- **Jamais de téléchargement complet du fichier** : toute lecture passe par
-  `ByteSource`/`HttpRangeReader` (requêtes `Range:`). Un serveur qui ne
-  gère pas les ranges doit être refusé (`RangeNotSupportedException`).
-- **Aucun proxy serveur** : le plugin parle directement au serveur de tuiles.
-- **Aucune dépendance externe** : uniquement le JDK + l'API JOSM
-  (`lib/josm-tested.jar`, fournie par `./fetch-josm.sh`). Pas de GDAL, pas de
-  bibliothèque TIFF/JPEG au runtime.
-- Licence **GPL v2+** (comme JOSM) ; ne pas ajouter de fichiers sous licence
-  incompatible. Pas d'en-tête de licence par fichier (un `LICENSE` racine
-  suffit, suivre l'existant).
-- V1 n'accepte que **EPSG:3857 et EPSG:4326**. Depuis la phase 2, la
-  reprojection par tuile est active pour les CRS listés dans `crs/Crs`
-  (4326, 3857, UTM WGS84 32601-32660 / 32701-32760, Lambert-93 2154) ;
-  depuis la phase 2.1 aussi les **GeoKeys custom (32767)** dont les
-  paramètres décrivent un modele connu (geographique, Transverse Mercator,
-  Lambert conique conforme 1SP/2SP — cf. `Crs.fromCustom`). Tout autre
-  CRS ou methode doit produire une erreur explicite (pas de reprojection
-  silencieuse ni de supposition de SRID). Pas de parsing PROJ.4/WKT :
-  seules les clefs GeoTIFF sont lues (choix assume, phase 2.2 = proj4j).
+- **Never download the whole file**: every read goes through
+  `ByteSource`/`HttpRangeReader` (`Range:` requests). A server that does not
+  support ranges must be rejected (`RangeNotSupportedException`).
+- **No server proxy**: the plugin talks directly to the tile server.
+- **No external dependency**: JDK + JOSM API only (`lib/josm-tested.jar`,
+  provided by `./fetch-josm.sh`). No GDAL, no TIFF/JPEG library at runtime.
+- License **GPL v2+** (like JOSM); do not add files under an incompatible
+  license. No per-file license header (a root `LICENSE` is enough, follow the
+  existing files).
+- V1 accepts only **EPSG:3857 and EPSG:4326**. Since phase 2, per-tile
+  reprojection is enabled for the CRSs listed in `crs/Crs` (4326, 3857, WGS84
+  UTM 32601-32660 / 32701-32760, Lambert-93 2154); since phase 2.1 also
+  **custom GeoKeys (32767)** whose parameters describe a known model
+  (geographic, Transverse Mercator, Lambert conformal conic 1SP/2SP — see
+  `Crs.fromCustom`). Any other CRS or method must raise an explicit error (no
+  silent reprojection, no SRID guessing). No PROJ.4/WKT parsing: only GeoTIFF
+  keys are read (assumed trade-off, phase 2.2 = proj4j).
 
-## Langue et style
+## Language and style
 
-- **Commentaires et messages du code source en ANGLAIS** (javadoc, commentaires
-  inline, messages d'exception, journaux). Les chaînes destinées à l'interface
-  JOSM (dialogues, info-bulles) sont en anglais **et enveloppées dans `tr()`** :
-  la version française provient de l'i18n JOSM, pas du code. Aucune lettre
-  accentuée ni signe non ASCII dans les sources (sauf « … » dans les chaînes
-  `tr()`, convention JOSM).
-- **Messages de commit en français sans accents.** La documentation Markdown
-  (README, ce fichier) est en français et peut garder les accents.
-- Identificateurs et API en anglais.
-- Imports en tête de fichier, sans import wildcard ; `Logging` de JOSM pour
-  toute journalisation, messages préfixés « josm-cog: ».
+- **Source-code comments and messages in ENGLISH** (javadoc, inline comments,
+  exception messages, logs). Strings intended for the JOSM GUI (dialogs,
+  tooltips) are in English **and wrapped in `tr()`**: the French version comes
+  from JOSM i18n, not from the code. No accented letter nor non-ASCII sign in
+  the sources (except the "…" in `tr()` strings, JOSM convention).
+- **Commit messages in French without accents.** This file (AGENTS.md) is in
+  English; README.md is in French and may keep accents.
+- Identifiers and API in English.
+- Imports at the top of files, no wildcard imports; JOSM `Logging` for all
+  logging, messages prefixed "josm-cog:".
 
-## Construire / tester
+## Build / test
 
 ```sh
-export JAVA_HOME=/home/llm/tools/jdk-21.0.13+9   # JDK 21 local (JDK 17+ requis)
-./fetch-josm.sh          # si lib/josm-tested.jar absent
+export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
+./fetch-josm.sh          # if lib/josm-tested.jar is missing
 ./gradlew build          # jar + tests -> build/libs/cog.jar
-./gradlew test           # tests seuls (JUnit 5)
+./gradlew test           # tests only (JUnit 5)
 ```
 
-- **Toujours vérifier la ligne « BUILD SUCCESSFUL »** dans la sortie complète.
-  Ne jamais écrire `./gradlew build 2>&1 | tail -1 && cp …` : `tail -1` peut
-  masquer un échec de compilation (le message « 1 actionable task ») et le
-  `cp` déployer un jar périmé.
-- Cible Java 17 (`options.release = 17`) : ne pas utiliser d'API plus récente.
+- **Always check the "BUILD SUCCESSFUL" line** in the full output. Never
+  write `./gradlew build 2>&1 | tail -1 && cp …`: `tail -1` can hide a
+  compile failure (the "1 actionable task" message) and `cp` would deploy a
+  stale jar.
+- Java 17 target (`options.release = 17`): do not use a more recent API.
 
-## Tâches gradle utiles
+## Useful gradle tasks
 
-- `./gradlew spike --args="https://exemple.tif"` : CLI de diagnostic, affiche
-  pyramide/emprise/SRID sans JOSM (à exécuter en premier sur tout nouveau COG).
-- `./gradlew spike --args="https://exemple.tif --tile NIVEAU TX TY out.png"` :
-  décode une tuile native en PNG.
-- `./gradlew serve-cog --args=". 8765"` : `CogFileServer` (outils de test),
-  serveur statique JDK avec byte-ranges. Exemple local :
+- `./gradlew spike --args="https://example.tif"`: diagnostic CLI, prints the
+  pyramid/extent/SRID without JOSM (run it first on any new COG).
+- `./gradlew spike --args="https://example.tif --tile LEVEL TX TY out.png"`:
+  decodes one native tile to PNG.
+- `./gradlew serve-cog --args=". 8765"`: `CogFileServer` (test tool), JDK
+  static server with byte-ranges. Local example:
   `http://127.0.0.1:8765/cog-paris-3857.tif`.
 
-## Architecture (packages sous `org.openstreetmap.josm.plugins.cog`)
+## Architecture (packages under `org.openstreetmap.josm.plugins.cog`)
 
-- `reader/` : cœur indépendant de JOSM (testable sans GUI).
-  `HttpRangeReader` (ByteSource HTTP) → `TiffParser` (IFD, GeoKeys) →
-  `CogInfo` (pyramide + géoréférencement) → `CogReader` (tuiles décodées,
-  cache LRU) → `CogComposer` (recomposition des tuiles OSM 256 px) et
-  `TileDecoder` (NONE/Deflate/PackBits/LZW/JPEG). `CustomCrs` porte les
-  GeoKeys bruts (doubles du locator 34736 inclus) quand le SRID est 0 ou
-  32767 ; `CogTileSource` resout la projection des sa reception du
-  `CogInfo` et garde l'erreur pour l'afficher au chargement de tuile.
-- `layer/` : intégration JOSM. `CogImageryLayer` extends
-  `AbstractCachedTileSourceLayer<CogTileSource>` ; `CogTileSource` est une
-  source TMS sans URL (synthèse à la volée) qui **porte le `CogReader`** ;
-  `CogTileLoaderJob` récupère le lecteur via `tile.getSource()`.
-- `AddCogLayerAction` : dialogue URL + ouverture + zoom vers l'emprise.
-- `crs/` : projections maison (Snyder / USGS PP 1312, précision sub-mm en
-  avant, validée contre GDAL/PROJ dans `ProjectionTest`). Interface
-  `Projection` (project/unproject), registre/cache `Crs.forEpsg`.
-  `CogComposer.composeWarp` : grille de controle 9x9 projetee exactement
-  (3857 -> lat/lon -> coordonnees modeles), interpolation bilineaire par
-  pixel de sortie, echantillonnage bilineaire ARGB conscient de l'alpha.
-  Les voies lineaires 3857/4326 de `compose` sont conservees (non-regression).
-- `tools/CogFileServer` : tests uniquement (ne pas lier au plugin).
+- `reader/`: JOSM-independent core (testable without GUI).
+  `HttpRangeReader` (HTTP ByteSource) → `TiffParser` (IFD, GeoKeys) →
+  `CogInfo` (pyramid + georeferencing) → `CogReader` (decoded tiles, LRU
+  cache) → `CogComposer` (recomposition of 256 px OSM tiles) and
+  `TileDecoder` (NONE/Deflate/PackBits/LZW/JPEG). `CustomCrs` carries the raw
+  GeoKeys (including 34736 doubles) when the SRID is 0 or 32767;
+  `CogTileSource` resolves the projection as soon as it receives the
+  `CogInfo` and keeps the error to display it at tile load time.
+- `layer/`: JOSM integration. `CogImageryLayer` extends
+  `AbstractCachedTileSourceLayer<CogTileSource>`; `CogTileSource` is a TMS
+  source without URL (on-the-fly synthesis) that **carries the `CogReader`**;
+  `CogTileLoaderJob` retrieves the reader via `tile.getSource()`.
+- `AddCogLayerAction`: URL dialog + open + zoom to the extent.
+- `crs/`: in-house projections (Snyder / USGS PP 1312, sub-mm accuracy in the
+  forward direction, validated against GDAL/PROJ in `ProjectionTest`).
+  `Projection` interface (project/unproject), registry/cache `Crs.forEpsg`.
+  `CogComposer.composeWarp`: 9x9 control grid projected exactly (3857 ->
+  lat/lon -> model coordinates), bilinear interpolation per output pixel,
+  alpha-aware ARGB bilinear sampling. The linear 3857/4326 paths of `compose`
+  are kept (non-regression).
+- `tools/CogFileServer`: tests only (must not be linked into the plugin).
 
-## Pièges TIFF/COG (tous déjà rencontrés — ne pas régresser)
+## TIFF/COG pitfalls (all already hit — do not regress)
 
-- Numérotation **libtiff** des balises tuiles : 322 TileWidth, 323 TileLength,
-  324 TileOffsets, 325 TileByteCounts. La balise **JPEGTables est 347**
-  (530 = YCbCrSubsampling, pas des tables JPEG !).
-- **Tuiles JPEG sans tables embarquées** : GDAL (driver COG) met les tables
-  DQT dans la balise 347 et non dans le flux. `TileDecoder.withJpegTables`
-  les réinsère quand le flux n'a pas de DQT avant SOS. Fixture de test :
+- **libtiff** numbering of tile tags: 322 TileWidth, 323 TileLength,
+  324 TileOffsets, 325 TileByteCounts. The **JPEGTables tag is 347**
+  (530 = YCbCrSubsampling, not JPEG tables!).
+- **JPEG tiles without embedded tables**: GDAL (COG driver) puts the DQT
+  tables in tag 347, not in the stream. `TileDecoder.withJpegTables`
+  re-injects them when the stream has no DQT before SOS. Test fixture:
   `src/test/resources/gdal-jpeg-{tables,tile}.bin`.
-- **Mercator sphérique** (grille OSM/JOSM/JMapViewer) : R = 6378137,
-  `HALF_CIRCUMFERENCE = π·R = 20037508,34` (la valeur « 20037504.17 » qui
-  circule est fausse). Les formules latToY/yToLat doivent utiliser R, pas
-  π·R. Un aller-retour seul ne détecte pas une erreur symétrique : les tests
-  contiennent des **valeurs absolues de contrôle**, les conserver.
-- **Tri de pyramide en int** : l'aire `width*height` d'un niveau déborde
-  `int` dès 2^31 pixels (COG PIX4Dmatic 131072x98304 = 3x2^32 → aire 0, et
-  l'overview 65536x49152 = 3x2^30 → négative) : les overviews passaient
-  avant le niveau 0 et le garde `flags&1` criait « IFD de pleine resolution
-  absent » sur des fichiers pourtant conformes. Utiliser `Long.compare`
-  (`TiffParser.sortLevelsByAreaDesc`, test non-regression dedie).
+- **Spherical Mercator** (OSM/JOSM/JMapViewer grid): R = 6378137,
+  `HALF_CIRCUMFERENCE = π·R = 20,037,508.34` (the widely circulated
+  "20037504.17" value is wrong). The latToY/yToLat formulas must use R, not
+  π·R. A round-trip alone does not detect a symmetric error: the tests contain
+  **absolute control values**, keep them.
+- **Pyramid sort computed as int**: a level's `width*height` area overflows
+  `int` from 2^31 pixels (PIX4Dmatic COG 131072x98304 = 3x2^32 → area 0, and
+  the overview 65536x49152 = 3x2^30 → negative): overviews came before level 0
+  and the `flags&1` guard wrongly raised "Missing full resolution IFD" on
+  perfectly valid files. Use `Long.compare`
+  (`TiffParser.sortLevelsByAreaDesc`, dedicated non-regression test).
 
-## Pièges API JOSM (validé sur r19678, `lib/josm-tested.jar`)
+## JOSM API pitfalls (validated on r19678, `lib/josm-tested.jar`)
 
-- **Manifest jar** : uniquement les noms officiels `Plugin-Class`,
-  `Plugin-Mainversion`, `Plugin-Minimum-Java-Version`. Les variantes du type
-  `Plugin-Main-Version` / `Plugin-Minimum-Java-Version` (avec tiret) sont
-  silencieusement ignorées → le plugin ne se charge pas, JOSM ne montre qu'un
-  warning « Version principale du greffon cog manquante ».
-- `AbstractCachedTileSourceLayer` construit **réflexivement** le
-  `CachedTileLoaderFactory(getCache(), getTileLoaderClass())` dans son
-  constructeur : `CogTileLoader` DOIT avoir un constructeur public
-  `(TileLoaderListener, ICacheAccess, TileJobOptions)` même si cache/options
-  sont inutilisés. Ne pas passer d'état par ce constructeur (d'où le lecteur
-  porté par `CogTileSource`).
-- `ImageryInfo` rejette les types inconnus : ne pas faire
-  `new ImageryInfo(name, url, "cog", …)`, utiliser le constructeur par défaut.
-- `Logging.warn(msg, args)` applique `MessageFormat` : les apostrophes dans un
-  message contenant `{0}` cassent le formatage (message brut affiché,
-  exception perdue). Écrire les messages JOSM sans apostrophes ou les passer
-  par `Logging.warn(exception)` séparément.
-- `MapView.zoomTo(Bounds)` est hérité de `NavigatableComponent` ; après
-  `addLayer`, le cadre de carte peut être en cours de création : le zoom est
-  différé par un `javax.swing.Timer` (voir `AddCogLayerAction`).
-- Journalisation du cycle de vie du plugin : `mapFrameInitialized` peut
-  manquer la fenêtre déjà ouverte → ajout de l'action au menu avec retry.
+- **Jar manifest**: only the official names `Plugin-Class`,
+  `Plugin-Mainversion`, `Plugin-Minimum-Java-Version`. Dash-variant names like
+  `Plugin-Main-Version` are silently ignored → the plugin does not load, JOSM
+  only shows a "Plugin main version missing" warning.
+- `AbstractCachedTileSourceLayer` builds
+  `CachedTileLoaderFactory(getCache(), getTileLoaderClass())` **by
+  reflection** in its constructor: `CogTileLoader` MUST have a public
+  `(TileLoaderListener, ICacheAccess, TileJobOptions)` constructor even if
+  cache/options are unused. Do not pass state through this constructor (hence
+  the reader carried by `CogTileSource`).
+- `ImageryInfo` rejects unknown types: do not do
+  `new ImageryInfo(name, url, "cog", …)`, use the default constructor.
+- `Logging.warn(msg, args)` applies `MessageFormat`: apostrophes in a message
+  containing `{0}` break the formatting (raw message displayed, exception
+  lost). Write JOSM messages without apostrophes or pass them through
+  `Logging.warn(exception)` separately.
+- `MapView.zoomTo(Bounds)` is inherited from `NavigatableComponent`; after
+  `addLayer`, the map frame may still be under construction: the zoom is
+  deferred with a `javax.swing.Timer` (see `AddCogLayerAction`).
+- Plugin lifecycle logging: `mapFrameInitialized` may miss an already open
+  window → the action is added to the menu with retry.
 
-## Pièges reprojection (phase 2, déjà rencontrés)
+## Reprojection pitfalls (phase 2, already hit)
 
-- `LambertConformalConic2SP` : le parametre `lat0` du constructeur masque le
-  champ radians `this.lat0` ; utiliser `t(this.lat0)` pour `rho0` (sinon NaN).
-- Convention GeoTIFF : le pixel k couvre [k, k+1[ et son CENTRE vaut k+0.5
-  (`col = (x - originX) / scaleX`, echantillonner en `col - 0.5`). Un motif
-  de test bilineaire centre sur les entiers fait un decalage systematique
-  d'un demi-pixel.
-- Ligne 0 d'une image Java = Nord = `bbox.maxY` : la grille de controle du
-  warp doit demarrer a `maxY` (sinon sortie retournee verticalement ; un
-  test qui reproduit la meme convention d'erreur ne la detecte pas).
-- References GDAL en Python : `srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)`
-  (methode `SetAxisMappingStrategy`, pas `SetAxisMapping`) pour obtenir
-  l'ordre lon/lat, sinon les transformees sont fausses.
-- Series de Snyder 6e ordre : ~3 mm d'erreur a 5 degres du meridien central
-  (tolerances de test elargies pour les cas hors fuseau UTM).
+- `LambertConformalConic2SP`: the constructor parameter `lat0` shadows the
+  radians field `this.lat0`; use `t(this.lat0)` for `rho0` (otherwise NaN).
+- GeoTIFF convention: pixel k covers [k, k+1[ and its CENTER is k+0.5
+  (`col = (x - originX) / scaleX`, sample at `col - 0.5`). A test pattern
+  centered on integers produces a systematic half-pixel shift.
+- Row 0 of a Java image = North = `bbox.maxY`: the warp control grid must
+  start at `maxY` (otherwise the output is vertically flipped; a test that
+  reproduces the same wrong convention will not catch it).
+- GDAL Python references:
+  `srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)`
+  (method `SetAxisMappingStrategy`, not `SetAxisMapping`) to get lon/lat
+  order, otherwise the transforms are wrong.
+- Snyder 6th-order series: ~3 mm error at 5 degrees from the central meridian
+  (test tolerances widened for cases outside a UTM zone).
 
-## Pièges GeoKeys custom (phase 2.1, déjà rencontrés)
+## Custom GeoKeys pitfalls (phase 2.1, already hit)
 
-- **Portee des constructeurs `crs/`** : un parametre « degres » qui porte le
-  meme nom qu'un champ en radians (`lat0`, `lon0`…) masque le champ ; les
-  projections LCC/TM etaient fausses de ce fait. Convention : parametres
-  suffixes `Deg` et `this.` explicite partout.
-- **Reconciliation 3074/3075** : GeoKey 3074 (TransformationCoordinnees) =
-  32767 chez GDAL ; le code de methode reel est en 3075. Les valeurs TM=1 et
-  LCC2SP=8 sont partagees entre les deux tables ; seuls les codes Lambert 1SP
-  different (3074=9 vs 3075=14). Albers (3075=11) N'EST PAS supporte : doit
-  etre refuse explicitement (fixture `custom_albers_cog.tif`).
-- **Convention PROJ du facteur d'echelle Lambert** : GeoKey 3092 (k0) absent
-  vaut 1,0 ; quand il est present, PROJ l'applique a TOUT le rayon rho
-  (pas seulement rho0), donc (lat0,lon0) tombe exactement sur (FE,FN) et la
-  scale locale a lat0 vaut k0. `LambertConformalConic2SP` fait de meme
-  (verifie contre GDAL : 1SP k_0=0.99987731, (45N,5E) -> (1000000,2000000)).
-- **Ellipsoide** : priorite aux doubles 2057 (axe) / 2059 (aplatissement),
-  sinon code 2056 (table `Ellipsoid.forGeoKeyCode`) ; premier meridien 2061
-  (double) supporte en geographique uniquement ; unites lineaires 3076 !=
-  9001 via l'adaptateur `Crs$Scaled` ; unites angulaires != degres refus.
-- **Écriveur de test `TestTiffWriter`** : `geoBlockSize()` doit rendre la
-  taille EXACTEMENT ecrite par `writeExt` (72 + 2*nKeys + 8*nDbl +
-  CITATION+1 en custom, 96 sinon) — un ecart de 7 octets decales tous les
-  TileOffsets (symptome : « Taille de tuile attendue N octets, recu 0 »).
-  Les clefs GeoKeys sont des `int[]` (le locator 34736 depasse short signe)
-  et `write()` verifie que l'en-tete NumberOfKeys correspond exactement aux
-  entrees presentes.
-- Les COG ecrits par GDAL en custom peuvent avoir 2061=0 meme si lon_0 etait
-  non nul dans la chaine PROJ generatrice : se fier aux GeoKeys lus, pas a
-  l'intention de generation (cas du fixture longlat).
-- **Hybride « code enregistre + parametres »** (exports PIX4Dmatic, ex.
-  COG_BayonneSudEst.tif en EPSG:3943/Lambert-43) : 3072 porte un code EPSG
-  connu de GDAL mais inconnu de notre registre, et 3074=32767 garantit que
-  TOUS les parametres de methode sont presents en DOUBLE. Regle : `TiffParser`
-  garde le `CustomCrs` des que 3074=32767, et `Crs.resolve(code, custom)`
-  tente le registre EPSG d'abord puis les parametres (jamais l'inverse, un
-  code au registre gagne). Sans 3074=32767, un 3072 enregistre reste refuse
-  (« clefs custom incoherentes ») : pas de parametres exploitables.
-  L'ecriveur de test aligne le bloc custom sur la PRESENCE de customKeys,
-  pas sur la valeur de crs (sinon 2 entrees IFD manquees, decalement de
-  24 octets de tout le bloc geographique).
+- **Scope of the `crs/` constructors**: a "degrees" parameter carrying the
+  same name as a radians field (`lat0`, `lon0`…) shadows that field; the
+  LCC/TM projections were wrong because of this. Convention: parameters
+  suffixed `Deg` and explicit `this.` everywhere.
+- **3074/3075 reconciliation**: GeoKey 3074 (ProjCoordTrans) = 32767 with
+  GDAL; the real method code is in 3075. The values TM=1 and LCC2SP=8 are
+  shared between both tables; only the Lambert 1SP codes differ (3074=9 vs
+  3075=14). Albers (3075=11) is NOT supported: it must be rejected
+  explicitly (fixture `custom_albers_cog.tif`).
+- **PROJ convention for the Lambert scale factor**: GeoKey 3092 (k0) missing
+  means 1.0; when present, PROJ applies it to the WHOLE rho radius (not only
+  rho0), so (lat0,lon0) falls exactly on (FE,FN) and the local scale at lat0
+  is k0. `LambertConformalConic2SP` does the same (verified against GDAL:
+  1SP k_0=0.99987731, (45N,5E) -> (1000000,2000000)).
+- **Ellipsoid**: prefer doubles 2057 (semi-major axis) / 2059 (inverse
+  flattening), otherwise code 2056 (table `Ellipsoid.forGeoKeyCode`); prime
+  meridian 2061 (double) supported in geographic mode only; linear units 3076
+  != 9001 via the `Crs$Scaled` adapter; angular units != degrees rejected.
+- **Test writer `TestTiffWriter`**: `geoBlockSize()` must return the size
+  EXACTLY written by `writeExt` (72 + 2*nKeys + 8*nDbl + CITATION+1 in custom
+  mode, 96 otherwise) — a 7-byte shift misplaces every TileOffsets (symptom:
+  "Expected tile size N bytes, received 0"). GeoKeys are `int[]` (the 34736
+  locator exceeds signed short) and `write()` checks that the header
+  NumberOfKeys matches exactly the present entries.
+- COGs written by GDAL in custom mode can have 2061=0 even when lon_0 was
+  non-zero in the generating PROJ string: trust the GeoKeys read, not the
+  generation intent (longlat fixture case).
+- **"Registered code + parameters" hybrid** (PIX4Dmatic exports, e.g.
+  COG_BayonneSudEst.tif in EPSG:3943/Lambert-43): 3072 carries an EPSG code
+  known to GDAL but unknown to our registry, and 3074=32767 guarantees that
+  ALL method parameters are present as DOUBLEs. Rule: `TiffParser` keeps the
+  `CustomCrs` as soon as 3074=32767, and `Crs.resolve(code, custom)` tries
+  the EPSG registry first then the parameters (never the other way around, a
+  registered code wins). Without 3074=32767, a registered 3072 stays rejected
+  ("inconsistent custom keys"): no usable parameters. The test writer aligns
+  the custom block on the PRESENCE of customKeys, not on the crs value
+  (otherwise 2 missing IFD entries, a 24-byte shift of the whole geographic
+  block).
 
-## Exemple COG de référence
+## Reference COG example
 
-`cog-paris-3857.tif` (racine, 1,4 Mo, EPSG:3857) et `cog-paris-l93.tif`
-(750 ko, EPSG:2154, même scène). Régénération :
+`cog-paris-3857.tif` (root, 1.4 MB, EPSG:3857) and `cog-paris-l93.tif`
+(750 KB, EPSG:2154, same scene). Regeneration:
 
 ```sh
 gdalwarp -t_srs EPSG:3857 -te_srs EPSG:4326 -te 2.25 48.80 2.45 48.92 \
@@ -209,15 +204,15 @@ gdalwarp -t_srs EPSG:2154 -te_srs EPSG:4326 -te 2.25 48.80 2.45 48.92 \
   cog-paris-l93.tif
 ```
 
-C'est le seul format COG « réaliste » couvert par les tests (JPEG à tables
-externes) ; les COG rasterio (tables dans le flux) sont aussi acceptés.
+It is the only "realistic" COG format covered by the tests (JPEG with
+external tables); rasterio COGs (tables in the stream) are also accepted.
 
-### Fixtures « GeoKeys custom » (phase 2.1)
+### "Custom GeoKeys" fixtures (phase 2.1)
 
 `custom_lcc_cog.tif`, `custom_tmerc_cog.tif`, `custom_longlat_cog.tif`
-(racine, générés par GDAL, donc GeoKeys 32767 + doubles 34736 réalistes) et
-`custom_albers_cog.tif` (methode 3075=11, doit etre **refuse**). Ancres de
-reference GDAL dans `CogCustomWarpTest`/`CustomCrsTest`. Régénération :
+(root, generated by GDAL, hence realistic GeoKeys 32767 + 34736 doubles) and
+`custom_albers_cog.tif` (method 3075=11, must be **rejected**). GDAL
+reference anchors in `CogCustomWarpTest`/`CustomCrsTest`. Regeneration:
 
 ```sh
 gdalwarp -q -of GTiff -tr 100 100 -t_srs "+proj=lcc +lat_1=44 +lat_2=49 +lat_0=46.5 +lon_0=3 +k_0=0.9999 +x_0=700000 +y_0=6600000 +ellps=GRS80 +units=m +no_defs" \
@@ -231,32 +226,33 @@ for f in custom_lcc custom_tmerc custom_longlat custom_albers; do
   gdal_translate -q -of COG -co COMPRESS=DEFLATE $f.tif ${f}_cog.tif; done
 ```
 
-## Tests GUI bout en bout (cette machine, optionnel)
+## End-to-end GUI tests (this machine, optional)
 
-Chercher d'abord à valider par `spike` + tests unitaires ; le GUI Xvfb est la
-dernière étape. Raccourcis connus :
+First try to validate with `spike` + unit tests; the Xvfb GUI is the last
+step. Known shortcuts:
 
-- Xvfb : `/tmp/opencode/xvfbroot/usr/bin/Xvfb :7 …` ; xdotool :
-  `/tmp/opencode/xdotooloroot/usr/bin/xdotool` avec
-  `LD_LIBRARY_PATH=/tmp/opencode/xdotooloroot/usr/lib/x86_64-linux-gnu` ;
-  capture : `DISPLAY=:7 import -window root`.
-- Lancement JOSM : mêmes `--add-exports` que `plugin` JOSM deb +
+- Xvfb: `/tmp/opencode/xvfbroot/usr/bin/Xvfb :7 …`; xdotool:
+  `/tmp/opencode/xdotooloroot/usr/bin/xdotool` with
+  `LD_LIBRARY_PATH=/tmp/opencode/xdotooloroot/usr/lib/x86_64-linux-gnu`;
+  capture: `DISPLAY=:7 import -window root`.
+- JOSM launch: same `--add-exports` as the Debian JOSM plugin +
   `-Djosm.home=/tmp/opencode/josmhome -Djosm.plugins=cog -Dimagery.proj=EPSG:3857`
-  + `--offline=ALL --debug` (le debug journalise `tileLoadingFinished`).
-- `pkill -f` tue son propre shell si le motif matche la ligne de commande :
-  écrire le motif en morceaux (`"josm-tes""ted.jar"`).
-- Vérification des liaisons sans GUI : `/tmp/opencode/LinkCheck.class`,
-  lancer `java -cp /usr/share/josm/josm.jar:build/libs/cog.jar:/tmp/opencode
-  LinkCheck build/libs/cog.jar` (le jar teste doit etre AUSSI dans le classpath).
+  + `--offline=ALL --debug` (debug logs `tileLoadingFinished`).
+- `pkill -f` kills its own shell when the pattern matches the command line:
+  write the pattern in pieces (`"josm-tes""ted.jar"`).
+- GUI-free link verification: `/tmp/opencode/LinkCheck.class`, run
+  `java -cp /usr/share/josm/josm.jar:build/libs/cog.jar:/tmp/opencode
+  LinkCheck build/libs/cog.jar` (the jar under test must ALSO be in the
+  classpath).
 
-## Feuille de route
+## Roadmap
 
-Phase 2 (faite) : reprojection par tuile (UTM, Lambert-93) via les formules
-`crs/` maison (pas de PRJ complet).
-Phase 2.1 (faite) : GeoKeys custom 32767 maps sur les classes `crs/`
-existantes (`Crs.fromCustom`), sans nouvelle mathematique de projection.
-Phase 2.2 (envisagee) : backend proj4j pour les modeles non couverts
-(Albers, Mercator oblique, datum non-WGS84…) — casserait la contreainte
-« aucune dependance », a arbitrer.
-Phase 3 : Publication sur la liste des plugins JOSM (nécessite `Plugin-Mainversion` à jour et
-javadoc/checkstyle JOSM si intégration upstream).
+Phase 2 (done): per-tile reprojection (UTM, Lambert-93) through the in-house
+`crs/` formulas (no full PRJ).
+Phase 2.1 (done): custom GeoKeys 32767 mapped onto the existing `crs/`
+classes (`Crs.fromCustom`), no new projection math.
+Phase 2.2 (considered): proj4j backend for models not covered (Albers,
+oblique Mercator, non-WGS84 datums…) — it would break the "no dependency"
+constraint, to be arbitrated.
+Phase 3: publication on the JOSM plugin list (requires an up-to-date
+`Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).
