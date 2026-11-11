@@ -118,6 +118,22 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   and the `flags&1` guard wrongly raised "Missing full resolution IFD" on
   perfectly valid files. Use `Long.compare`
   (`TiffParser.sortLevelsByAreaDesc`, dedicated non-regression test).
+- **BigTIFF (magic 43)** is not classic TIFF stretched: header is 16 bytes
+  (offset size + constant), entry counts and next-IFD are uint64, entries are
+  **20 bytes** (count uint64, value field 8 bytes, inline up to 8), types
+  LONG8/SLONG8/IFD8 = 16/17/18. The 64-bit entry count is hostile: capped by
+  `MAX_IFD_ENTRIES`.
+- **GDAL alpha COGs interleave a mask IFD chain**: one RGB (or grey) IFD per
+  level followed by a transparency mask IFD (photometric=4 MinIsMask, often
+  1-bit Deflate — `toImage` cannot even size it: 512x512x1bit = 32768 bytes).
+  Counting them as levels doubles the pyramid and swaps RGB for mask at
+  alternating zooms. `toLevel` skips them (photometric 4 / NewSubfileType
+  bit 4); real alpha compositing is a later phase. Real sample: PIX4Dmatic
+  `Anglet2025_COG.tif` (3.8 GB, BigTIFF, EPSG:3943).
+- **`getRGB()` on `TYPE_BYTE_GRAY` is ICC transformed** (sample 10 comes back
+  as 0x38 under the default gray profile): the plugin consumers use the
+  raster, and tests on grey tiles must assert `getRaster().getSample`, never
+  `getRGB`.
 
 ## JOSM API pitfalls (validated on r19678, `lib/josm-tested.jar`)
 

@@ -43,6 +43,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Cache LRU metadata (jamais le raster brut) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Conteneur BigTIFF (décalages 64 bits, fichiers PIX4Dmatic) | ✅ |
+| IFD de masque alpha entrelacés (photometrique 4) | détectés, ignorés (composition plus tard) |
 | Pyramide multi-niveaux, choix du meilleur niveau | ✅ |
 | Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |
 | Couche JOSM fonctionnelle (menu Imagery) | ✅ |

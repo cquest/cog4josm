@@ -432,4 +432,79 @@ class TiffParserTest {
         assertEquals(1, ifds.get(0).entry(700).doubles.length);
     }
 
+    // --- interleaved transparency mask IFDs (GDAL COG with alpha) ---
+
+    /** Two chained classic IFDs; external values follow both IFD tables. */
+    private static byte[] rawTiffChain(RawEntry[]... ifds) throws IOException {
+        long[] ifdPos = new long[ifds.length];
+        long pos = 8;
+        for (int i = 0; i < ifds.length; i++) {
+            ifdPos[i] = pos;
+            pos += 2 + 12L * ifds[i].length + 4;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write('I');
+        out.write('I');
+        w16(out, 42);
+        w32(out, 8);
+        long extPos = pos;
+        for (int i = 0; i < ifds.length; i++) {
+            w16(out, ifds[i].length);
+            for (RawEntry e : ifds[i]) {
+                w16(out, e.tag());
+                w16(out, e.type());
+                w32(out, e.count());
+                if (e.ext() == null) {
+                    w32(out, e.value());
+                } else {
+                    w32(out, extPos);
+                    extPos += e.ext().length;
+                }
+            }
+            w32(out, i + 1 < ifds.length ? ifdPos[i + 1] : 0);
+        }
+        for (RawEntry[] es : ifds) {
+            for (RawEntry e : es) {
+                if (e.ext() != null) {
+                    out.write(e.ext());
+                }
+            }
+        }
+        return out.toByteArray();
+    }
+
+    @Test
+    void skipsInterleavedMaskIfd() throws IOException {
+        // Anglet-style COG: RGB level then same-size photometric=4 mask IFD.
+        // The mask must not become a pyramid level (it would swap RGB for a
+        // 1-bit mask at alternating zooms).
+        int tileOff = 8 + (2 + 12 * 12 + 4) + (2 + 12 * 10 + 4) + 24 + 48;
+        byte[] file0 = rawTiffChain(
+                new RawEntry[]{
+                        new RawEntry(256, 3, 1, 2, null), new RawEntry(257, 3, 1, 2, null),
+                        new RawEntry(258, 3, 1, 8, null), new RawEntry(259, 3, 1, 1, null),
+                        new RawEntry(262, 3, 1, 1, null), new RawEntry(277, 3, 1, 1, null),
+                        new RawEntry(322, 3, 1, 2, null), new RawEntry(323, 3, 1, 2, null),
+                        new RawEntry(324, 4, 1, tileOff, null), new RawEntry(325, 4, 1, 4, null),
+                        new RawEntry(33550, 12, 3, 0, leDoubles(1, 1, 0)),
+                        new RawEntry(33922, 12, 6, 0, leDoubles(0, 0, 0, 500000, 6250000, 0))},
+                new RawEntry[]{
+                        new RawEntry(256, 3, 1, 2, null), new RawEntry(257, 3, 1, 2, null),
+                        new RawEntry(258, 3, 1, 1, null), new RawEntry(259, 3, 1, 1, null),
+                        new RawEntry(262, 3, 1, 4, null), new RawEntry(277, 3, 1, 1, null),
+                        new RawEntry(322, 3, 1, 2, null), new RawEntry(323, 3, 1, 2, null),
+                        new RawEntry(324, 4, 1, tileOff, null), new RawEntry(325, 4, 1, 4, null)});
+        byte[] file = Arrays.copyOf(file0, tileOff + 4);
+        file[tileOff] = 10;
+        file[tileOff + 1] = 20;
+        file[tileOff + 2] = 30;
+        file[tileOff + 3] = 40;
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(file));
+        assertEquals(1, ci.levels.size());
+        assertEquals(1, ci.levels.get(0).photometric);
+        try (CogReader r = CogReader.open(new InMemoryByteSource(file))) {
+            java.awt.image.BufferedImage img = r.getTile(0, 0, 0);
+            assertEquals(10, img.getRaster().getSample(0, 0, 0));
+        }
+    }
 }

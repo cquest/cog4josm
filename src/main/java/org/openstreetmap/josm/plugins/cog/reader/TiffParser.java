@@ -494,6 +494,15 @@ public final class TiffParser {
                 || !ifd.has(TAG_TILE_OFFSETS) || !ifd.has(TAG_TILE_BYTE_COUNTS)) {
             return null;
         }
+        // GDAL COGs with an alpha band interleave a second IFD chain of
+        // transparency masks (photometric=4 MinIsMask, NewSubfileType bit 4,
+        // often 1-bit DEFLATE): not displayable imagery, and counting them as
+        // pyramid levels would double the pyramid and swap RGB for mask at
+        // some zooms. They are skipped; alpha compositing is a later phase.
+        if ((ifd.getLong(TAG_NEW_SUBFILETYPE, 0) & 4) != 0
+                || ifd.getLong(TAG_PHOTOMETRIC, 1) == 4) {
+            return null;
+        }
         long[] offsets = ifd.getLongs(TAG_TILE_OFFSETS);
         long[] counts = ifd.getLongs(TAG_TILE_BYTE_COUNTS);
         if (offsets == null || counts == null || offsets.length != counts.length) {

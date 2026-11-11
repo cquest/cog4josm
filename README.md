@@ -42,6 +42,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Metadata LRU cache (never raw raster) | ✅ |
 | TIFF/GeoTIFF parser (IFD, sub-IFD, GeoKeys) | ✅ |
 | BigTIFF container (64-bit offsets, PIX4Dmatic files) | ✅ |
+| Interleaved alpha-mask IFDs (photometric 4) | detected, skipped (compositing later) |
 | Multi-level pyramid, best level choice | ✅ |
 | Web-Mercator tile recomposition | ✅ (EPSG:3857/4326) |
 | Working JOSM layer (Imagery menu) | ✅ |
