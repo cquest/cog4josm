@@ -64,7 +64,6 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Reprojection (UTM, Lambert-93) | ✅ |
 | "Custom" GeoKeys (unregistered CRS, written by GDAL) | ✅ |
 | EPSG codes from the projection table shipped by JOSM | ✅ (phase 2.3) |
-| STAC panel (Panoramax) | ⏳ phase 3 |
 
 ## Supported coordinate systems
 

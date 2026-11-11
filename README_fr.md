@@ -67,7 +67,6 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Reprojection (UTM, Lambert-93) | ✅ |
 | GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
 | Codes EPSG pris de la table de projections embarquée par JOSM | ✅ (phase 2.3) |
-| Panneau STAC (Panoramax) | ⏳ phase 3 |
 
 ## Systèmes de coordonnées pris en charge
 
