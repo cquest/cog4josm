@@ -2,6 +2,12 @@
 
 (English version: [README.md](README.md))
 
+> Note du vite-codeur :
+> Ce projet a été "vite-codé" pour expérimenter les possibilités d'utilisation en local de Qwen3.8-flash-next couplé à opencode.
+> Il est mis sous licence GPL conformément à sa dépendance à JOSM, mais aurait plus naturellement été mis sous WTFPL.
+> Je ne compte pas le maintenir, mais comme il fonctionne et rend un service réel, je préfère le partager.
+
+
 Plugin JOSM qui affiche des images **COG (Cloud Optimized GeoTIFF)** distantes
 comme couches d'arrière-plan, en les lisant **par HTTP byte-ranges** : jamais
 le fichier entier n'est téléchargé, seules les tuiles TIFF utiles sont

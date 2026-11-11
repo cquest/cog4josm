@@ -2,6 +2,11 @@
 
 (French version: [README_fr.md](README_fr.md))
 
+> Note from the vibe-coder :
+> I vibe coded this project as an experimentation of local Qwen3.8-flash-next coupled with opencode.
+> It is here under GPL license to conform to JOSM license, but would have more naturally let it under WTFPL.
+> I do not plan to maintain it, but as it works and can be useful, I prefer to share it.
+
 JOSM plugin displaying remote **COG (Cloud Optimized GeoTIFF)** imagery as
 background layers, read **through HTTP byte-ranges**: the whole file is
 never downloaded, only the needed TIFF tiles are fetched (and memory cached).
