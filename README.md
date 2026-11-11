@@ -31,11 +31,11 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   validated by size/ETag: reopening the same COG costs a single probe
   request. Raster content is never cached as raw bytes (only as decoded
   images).
-* Minimal dependencies: JDK, JOSM API, plus the embedded proj4j core in the
-  jar (Apache-2.0, used only for verified reprojection models). CRS
-  parameters always come from the file itself (GeoKeys) or from the
-  projection table shipped by JOSM — the plugin embeds and downloads no
-  EPSG database of its own.
+* Minimal dependencies: **JDK + JOSM API only**. The plugin jar contains no
+  third-party code (GPL v2+ only). CRS parameters always come from the file
+  itself (GeoKeys) or from the projection table shipped by JOSM — the
+  plugin embeds and downloads no EPSG database of its own; models the
+  plugin cannot compute are refused.
 
 ## Status (v0.1)
 
@@ -52,7 +52,6 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Working JOSM layer (Imagery menu) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
 | "Custom" GeoKeys (unregistered CRS, written by GDAL) | ✅ |
-| Extra CRS models via proj4j fallback (Albers…) | ✅ (phase 2.2) |
 | EPSG codes from the projection table shipped by JOSM | ✅ (phase 2.3) |
 | STAC panel (Panoramax) | ⏳ phase 3 |
 
@@ -77,15 +76,13 @@ projection model is one the plugin computes, for instance UTM
 | `tmerc` | in-house Transverse Mercator |
 | `utm` | in-house Transverse Mercator (zone form) |
 | `lcc` | in-house Lambert conformal conic 1SP/2SP |
-| `aea`, `laea` | proj4j fallback (verified against PROJ at ±1 mm) |
-| `stere` | proj4j fallback (oblique k form, polar lat_ts form) |
 
-Table entries using another model (Mercator `merc`, oblique stereographic
-`sterea`, sloping Mercator `somerc`, equidistant conic, polyconic,
-orthographic…), a token the plugin cannot honour (unusual axis order,
-named prime meridian, vertical unit) or a form measured to drift in the
-proj4j port (polar stereographic with `+k` only, no `+lat_ts`) are
-**rejected with an explicit reason** — never silently reprojected.
+Table entries using another model — Mercator `merc`, Albers `aea`,
+Lambert azimuthal equal area `laea`, stereographic `stere`, oblique
+stereographic `sterea`, sloping Mercator `somerc`, equidistant conic,
+polyconic, orthographic… — or a token the plugin cannot honour (unusual
+axis order, named prime meridian, vertical unit) are **rejected with an
+explicit reason** — never silently reprojected.
 
 Besides the codes resolved through the table, the plugin understands
 "custom" GeoKeys (value 32767, what GDAL writes for any system described
@@ -94,13 +91,8 @@ by its parameters) when they match a known model:
 | Method (GeoKey 3075) | Supported system |
 |---|---|
 | 1 | Transverse Mercator (free ellipsoid and parameters) |
-| 8 | Lambert conformal conic 1SP/2SP |
-| 10 | Lambert azimuthal equal area (proj4j fallback) |
-| 11 | Albers equal area conic (proj4j fallback) |
-| 14 | Oblique Stereographic (no standard parallels 3078/3079) |
-| 15 | Polar Stereographic (pole from the sign of GeoKey 3081) |
-| 28 | Cylindrical equal area (proj4j fallback) |
-| 9815 | Oblique Mercator, Swiss form (GeoKeys 3094 = 3096 = 90) |
+| 8 | Lambert conformal conic 2SP |
+| 9, or 14 with standard parallels 3078/3079 | Lambert conformal conic 1SP |
 | — | Geodetic (geographic), ellipsoid + prime meridian |
 
 An EPSG code not listed above but **accompanied by its GeoKeys parameters**
@@ -108,19 +100,20 @@ An EPSG code not listed above but **accompanied by its GeoKeys parameters**
 and the full parameter set) is recognized by the same mechanism: the
 plugin falls back on the declared parameters.
 
-Any other method (equidistant conic 13, Mercator with standard parallel 7,
-polyconic 22, orthographic 21, general oblique Mercator), a sphere
-(1/f = 0), non-degree angular unit or missing parameter is **rejected with
-an explicit error message** — never silently reprojected. The proj4j
-fallback only covers models measured to agree with PROJ within a
-millimetre; where its formulas drift, the method stays rejected.
+Any other method (Lambert azimuthal equal area 10, Albers 11,
+equidistant conic 13, stereographic 14/15, Mercator with standard
+parallel 7, orthographic 21, polyconic 22, cylindrical equal area 28,
+oblique/sloping Mercator 9815), a sphere (1/f = 0), non-degree angular
+unit or missing parameter is **rejected with an explicit error
+message** — never silently reprojected. The proj4j fallback added in
+phase 2.2 was **removed in phase 2.4** to keep the project under pure
+GPL v2+ (no third-party code inside the jar); the models it served are
+refused again.
 
 Projections are computed in-house (Snyder series, sub-millimetric forward
-accuracy, validated against GDAL/PROJ) or, for the models out of that
-scope, through the embedded proj4j library — restricted to the subset
-verified against PROJ anchors in the unit tests. Non-WGS84 datums (NTF,
-SAD69…) are treated as WGS84: possible offset of the order of a hundred
-meters, acceptable for a map background.
+accuracy, validated against GDAL/PROJ anchors in the unit tests).
+Non-WGS84 datums (NTF, SAD69…) are treated as WGS84: possible offset of
+the order of a hundred meters, acceptable for a map background.
 
 ## Building
 
@@ -144,12 +137,12 @@ The compiled JOSM API is downloaded by:
 
 ```sh
 ./fetch-josm.sh          # places lib/josm-tested.jar
-./gradlew build          # produces build/libs/cog.jar + runs the tests
+./gradlew build          # produces build/libs/cog4josm.jar + runs the tests
 ```
 
 ## Using
 
-1. Copy `build/libs/cog.jar` to `~/.josm/plugins/` (or "Preferences →
+1. Copy `build/libs/cog4josm.jar` to `~/.josm/plugins/` (or "Preferences →
    Plugins → Install from file").
 2. Restart JOSM.
 3. Menu **Imagery → Add remote COG (GeoTIFF) background layer…** and paste
@@ -171,6 +164,6 @@ GeoTIFF SRID, and can decode one tile to PNG.
 
 ## License
 
-GPL v2 or later (like JOSM). The plugin jar embeds the proj4j core
-(Apache-2.0, used only for GeoKeys parameters — never an EPSG database);
-its license text ships inside `cog.jar` as `META-INF/LICENSE-proj4j.txt`.
+GPL v2 or later (like JOSM). The plugin jar contains only the plugin's own
+code - no embedded third-party library - so the project ships under pure
+GPL; the former proj4j dependency (Apache-2.0) was removed in phase 2.4.

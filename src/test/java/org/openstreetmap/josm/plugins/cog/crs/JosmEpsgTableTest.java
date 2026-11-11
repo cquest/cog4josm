@@ -1,7 +1,6 @@
 package org.openstreetmap.josm.plugins.cog.crs;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,13 +32,16 @@ class JosmEpsgTableTest {
         assertTrue(JosmEpsgTable.reason(2172).contains("sterea"));
         assertTrue(JosmEpsgTable.reason(53004).contains("Mercator is not taken"));
         assertTrue(JosmEpsgTable.reason(23700).contains("somerc"));
-        // ESRI polar stereographic "k only" form (no +lat_ts): proj4j and PROJ
-        // disagree at the pole, the entry must stay explicitly rejected
-        assertTrue(JosmEpsgTable.reason(102018).contains("polar stereographic without +lat_ts"));
+        // aea/laea/stere were routed to the proj4j fallback until phase 2.3;
+        // since its removal (2.4) they fall into the generic model refusal
+        assertTrue(JosmEpsgTable.reason(102018).contains("model +proj=stere"));
+        assertTrue(JosmEpsgTable.reason(3035).contains("model +proj=laea"));
+        assertTrue(JosmEpsgTable.reason(102001).contains("model +proj=aea"));
         assertNull(JosmEpsgTable.create(102018));
         assertNull(JosmEpsgTable.create(2172));
         assertNull(JosmEpsgTable.create(53004));
-        assertNotNull(JosmEpsgTable.create(3035)); // was rejected pre-2.3
+        assertNull(JosmEpsgTable.create(3035));
+        assertNull(JosmEpsgTable.create(102001));
     }
 
     private static void assertRejected(String reasonFragment, String def) {
@@ -78,17 +80,13 @@ class JosmEpsgTableTest {
         assertRejected("null standard parallels",
                 "+proj=lcc +lat_1=0 +lat_0=46 +lon_0=3 +ellps=GRS80");
         assertRejected("UTM zone out of range", "+proj=utm +zone=61 +datum=WGS84");
-        assertRejected("only the k = 1 form",
+        // models of the removed proj4j fallback: refused at model level,
+        // whatever their parameter shape
+        assertRejected("model +proj=stere",
                 "+proj=stere +lat_0=90 +lat_ts=70 +lon_0=0 +k=0.999 +datum=WGS84");
-        assertRejected("inconsistent with the pole",
-                "+proj=stere +lat_0=90 +lat_ts=-70 +lon_0=0 +k=1 +datum=WGS84");
-        assertRejected("without +lat_ts nor +k",
-                "+proj=stere +lat_0=45 +lon_0=0 +datum=WGS84");
-        // the proj4j models are never run on a sphere (inverse not verified)
-        assertRejected("sphere ellipsoid",
-                "+proj=laea +lat_0=52 +lon_0=10 +ellps=sphere");
-        assertRejected("sphere ellipsoid",
-                "+proj=aea +lat_1=30 +lat_2=60 +lat_0=40 +lon_0=-96 +ellps=sphere");
+        assertRejected("model +proj=laea", "+proj=laea +lat_0=52 +lon_0=10 +ellps=sphere");
+        assertRejected("model +proj=aea",
+                "+proj=aea +lat_1=30 +lat_2=60 +lat_0=40 +lon_0=-96 +ellps=GRS80");
     }
 
     /** DMS spellings (52d9'22.178", 5d23'15.5", 0dE, 96dW) parse as decimal degrees. */

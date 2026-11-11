@@ -242,6 +242,57 @@ class CustomCrsTest {
         assertTrue(e.getMessage().contains("unsupported"));
     }
 
+    /**
+     * Methods served by the proj4j fallback in phases 2.2-2.3 are refused
+     * again since its removal (phase 2.4, pure GPL): laea 10, aea 11,
+     * cea 28, polar stereographic 15, somerc/Hotine 9815.
+     */
+    @Test
+    void formerProj4jMethodsRejectedAgain() {
+        double[] d = {42.0, 44.0, 3.0, 46.0, 1000000.0, 6000000.0};
+        for (final int method : new int[] {10, 11, 28, 15, 9815}) {
+            Key[] keys = {
+                new Key(1024, 0, 1, 1),
+                new Key(2056, 0, 1, 7019), // GRS80
+                new Key(3072, 0, 1, 32767),
+                new Key(3074, 0, 1, 32767),
+                new Key(3075, 0, 1, method),
+                new Key(3078, 34736, 1, 0),
+                new Key(3079, 34736, 1, 1),
+                new Key(3080, 34736, 1, 2),
+                new Key(3081, 34736, 1, 3),
+                new Key(3082, 34736, 1, 4),
+                new Key(3083, 34736, 1, 5),
+            };
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> Crs.fromCustom(new CustomCrs(keys, d, null)),
+                    "3075=" + method + " must be rejected");
+            assertTrue(e.getMessage().contains("unsupported projection model"),
+                    "3075=" + method + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * 3075=14 without standard parallels 3078/3079 means oblique
+     * Stereographic for GDAL: refused since 2.4 (never approximated with
+     * Lambert); with the parallels it stays the in-house Lambert 1SP.
+     */
+    @Test
+    void obliqueStereographicRejected() {
+        Key[] keys = {
+            new Key(1024, 0, 1, 1),
+            new Key(2056, 0, 1, 7019),
+            new Key(3072, 0, 1, 32767),
+            new Key(3074, 0, 1, 32767),
+            new Key(3075, 0, 1, 14),
+            new Key(3080, 34736, 1, 0),
+            new Key(3081, 34736, 1, 1),
+        };
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> Crs.fromCustom(new CustomCrs(keys, new double[]{3.0, 46.0}, null)));
+        assertTrue(e.getMessage().contains("oblique Stereographic"), e.getMessage());
+    }
+
     @Test
     void missingEllipsoidRejected() {
         Key[] keys = {

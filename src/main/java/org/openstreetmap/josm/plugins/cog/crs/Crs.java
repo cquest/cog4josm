@@ -14,8 +14,7 @@ import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
  *   <li>any EPSG code listed in the projection definitions shipped by the
  *       host application (JOSM's data/projection/custom-epsg), when its
  *       model is one the plugin computes: geographic, transverse Mercator
- *       and UTM, Lambert conformal conic 1SP/2SP, plus the verified proj4j
- *       subset (Albers, LAEA, stereographic) - see {@link JosmEpsgTable};</li>
+ *       and UTM, Lambert conformal conic 1SP/2SP - see {@link JosmEpsgTable};</li>
  *   <li>GeoTIFF GeoKey "user-defined" systems (codes 32767) when their
  *       parameters match a known model: geographic, transverse Mercator or
  *       Lambert conformal conic (phase 2.1, see {@link #fromCustom}).</li>
@@ -206,9 +205,12 @@ public final class Crs {
                         && c.find(CustomCrs.KEY_PROJ_STD_PARALLEL1) == null
                         && c.find(CustomCrs.KEY_PROJ_STD_PARALLEL2) == null) {
                     // 3075=14 without standard parallels: GDAL means oblique
-                    // Stereographic (natural origin 3088/3089), not Lambert 1SP
-                    p = Proj4Backend.create(c, CustomCrs.M_STEREOGRAPHIC, ell, unitFactor);
-                    break;
+                    // Stereographic (natural origin 3088/3089), not Lambert 1SP;
+                    // the model left the supported set when the proj4j fallback
+                    // was removed (phase 2.4): explicit refusal, no Lambert guess
+                    throw new IllegalArgumentException("unsupported projection model:"
+                            + " oblique Stereographic (3075=" + CustomCrs.M_LAMBERT_CONFORMAL_1SP
+                            + " without standard parallels) " + describeMethod(coordTrans, methodCode));
                 }
                 double lat0 = reqDouble(c, CustomCrs.KEY_PROJ_ORIG_LAT, 3081);
                 double lon0 = optDouble(c, CustomCrs.KEY_PROJ_CENT_MERIDIAN, 0.0);
@@ -221,12 +223,9 @@ public final class Crs {
                 break;
             }
             default:
-                // phase 2.2: models outside the in-house set go through the
-                // proj4j fallback, but only the verified subset (see there)
-                if (Proj4Backend.supports(method)) {
-                    p = Proj4Backend.create(c, method, ell, unitFactor);
-                    break;
-                }
+                // models outside the in-house set are refused: the proj4j
+                // fallback of phase 2.2 was removed in 2.4 (pure GPL project,
+                // no third-party code in the jar); no silent approximation
                 throw new IllegalArgumentException("unsupported projection model: "
                         + describeMethod(coordTrans, methodCode));
         }

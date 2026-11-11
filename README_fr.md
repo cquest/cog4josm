@@ -32,11 +32,12 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
   qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
   octets bruts (seulement en images décodées).
-* Dépendances minimales : JDK, API JOSM, plus le cœur proj4j intégré au
-  jar (Apache-2.0, utilisé uniquement pour les modèles de projection
-  vérifiés). Les paramètres des CRS viennent toujours du fichier lui-même
-  (GeoKeys) ou de la table de projections embarquée par JOSM — le plugin
-  n'embarque ni ne télécharge aucune base EPSG propre.
+* Dépendances minimales : **JDK + API JOSM uniquement**. Le jar du plugin
+  ne contient aucun code tiers (GPL v2+ pure). Les paramètres des CRS
+  viennent toujours du fichier lui-même (GeoKeys) ou de la table de
+  projections embarquée par JOSM — le plugin n'embarque ni ne télécharge
+  aucune base EPSG propre ; les modèles qu'il ne sait pas calculer sont
+  refusés.
 
 ## État (v0.1)
 
@@ -53,7 +54,6 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Couche JOSM fonctionnelle (menu Imagery) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
 | GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
-| Modèles de projection supplémentaires via repli proj4j (Albers…) | ✅ (phase 2.2) |
 | Codes EPSG pris de la table de projections embarquée par JOSM | ✅ (phase 2.3) |
 | Panneau STAC (Panoramax) | ⏳ phase 3 |
 
@@ -79,16 +79,15 @@ ETRS89-LAEA (3035) :
 | `tmerc` | Transverse de Mercator en interne |
 | `utm` | Transverse de Mercator en interne (forme zone) |
 | `lcc` | Conique conforme de Lambert 1SP/2SP en interne |
-| `aea`, `laea` | repli proj4j (vérifié contre PROJ à ±1 mm) |
-| `stere` | repli proj4j (forme oblique k, forme polaire lat_ts) |
 
-Les entrées de la table utilisant un autre modèle (Mercator `merc`,
-stéréographique oblique `sterea`, Mercator oblique `somerc`, conique
-équidistante, polyconique, orthographique…), un jeton que le plugin ne
-peut pas honorer (ordre d'axes inhabituel, premier méridien nommé, unité
-verticale) ou une forme mesurée en dérive dans le port proj4j
-(stéréographique polaire avec `+k` seul, sans `+lat_ts`) sont **refusées
-avec une raison explicite** — jamais reprojetées silencieusement.
+Les entrées de la table utilisant un autre modèle — Mercator `merc`,
+conique équivalente d'Albers `aea`, conique équivalente de Lambert
+`laea`, stéréographique `stere`, stéréographique oblique `sterea`,
+Mercator oblique `somerc`, conique équidistante, polyconique,
+orthographique… — ou un jeton que le plugin ne peut pas honorer (ordre
+d'axes inhabituel, premier méridien nommé, unité verticale) sont
+**refusées avec une raison explicite** — jamais reprojetées
+silencieusement.
 
 En plus des codes résolus via la table, le plugin comprend les GeoKeys
 « custom » (valeur 32767, ce que GDAL écrit pour tout système décrit par
@@ -97,13 +96,8 @@ ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 | Méthode (GeoKey 3075) | Système pris en charge |
 |---|---|
 | 1 | Transverse de Mercator (ellipsoïde et paramètres libres) |
-| 8 | Conique conforme de Lambert 1SP/2SP |
-| 10 | Conique équivalente de Lambert (repli proj4j) |
-| 11 | Conique équivalente d'Albers (repli proj4j) |
-| 14 | Stéréographique oblique (sans parallèles étalons 3078/3079) |
-| 15 | Stéréographique polaire (pôle déduit du signe du GeoKey 3081) |
-| 28 | Cylindrique équivalente (repli proj4j) |
-| 9815 | Mercator oblique, forme suisse (GeoKeys 3094 = 3096 = 90) |
+| 8 | Conique conforme de Lambert 2SP |
+| 9, ou 14 avec parallèles étalons 3078/3079 | Conique conforme de Lambert 1SP |
 | — | Systématique (géographique), ellipsoïde + premier méridien |
 
 Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
@@ -111,20 +105,21 @@ GeoKeys** (cas des exports PIX4Dmatic, qui associent un code non listé à
 3074=32767 et au jeu complet de paramètres) est reconnu par le même
 mécanisme : le plugin retombe sur les paramètres déclarés.
 
-Toute autre méthode (conique équidistante 13, Mercator avec parallèle
-étalon 7, polyconique 22, orthographique 21, Mercator oblique général),
-une sphère (1/f = 0), unité angulaire non degré ou paramètre manquant est
+Toute autre méthode (conique équivalente de Lambert 10, conique
+équivalente d'Albers 11, conique équidistante 13, stéréographique
+14/15, Mercator avec parallèle étalon 7, orthographique 21, polyconique
+22, cylindrique équivalente 28, Mercator oblique 9815), une sphère
+(1/f = 0), unité angulaire non degré ou paramètre manquant est
 **refusée avec un message d'erreur explicite** — jamais reprojetée
-silencieusement. Le repli proj4j ne couvre que les modèles mesurés en
-accord avec PROJ au millimètre ; là où ses formules divergent, la méthode
-reste refusée.
+silencieusement. Le repli proj4j ajouté en phase 2.2 a été **supprimé en
+phase 2.4** pour garder le projet sous GPL v2+ pure (aucun code tiers
+dans le jar) ; les modèles qu'il servait sont de nouveau refusés.
 
 Les projections sont calculées en interne (séries de Snyder, précision
-sub-millimétrique en avant, validée contre GDAL/PROJ) ou, pour les modèles
-hors de ce périmètre, via la bibliothèque proj4j intégrée — limitée au
-sous-ensemble vérifié sur des ancres PROJ dans les tests unitaires. Les
-datums non-WGS84 (NTF, SAD69…) sont traités comme WGS84 : décalage possible
-de l'ordre de la centaine de mètres, acceptable pour un fond cartographique.
+sub-millimétrique en avant, validée contre des ancres GDAL/PROJ dans les
+tests unitaires). Les datums non-WGS84 (NTF, SAD69…) sont traités comme
+WGS84 : décalage possible de l'ordre de la centaine de mètres,
+acceptable pour un fond cartographique.
 
 ## Construire
 

@@ -166,12 +166,6 @@ class ProjectionTest {
         {2233, -97.5, 35.5, 5380250.207830, 677092.226878, 1200.0 / 3937.0},
         // utm (datum=nzgd49 -> intl, south)
         {27258, 165.0, -45.0, 500000.000000, 5016956.877773, 1},
-        // proj4j subset: laea / stere / aea
-        {3035, 10.0, 52.0, 4321000.000000, 3210000.000000, 1},        // laea origin
-        {3035, 11.5, 51.2, 4425835.658703, 3122067.988768, 1},
-        {3572, -150.0, 45.0, 0.000000, -4889334.802955, 1},           // laea north pole
-        {3031, 0.0, -71.0, 0.000000, 2082760.108543, 1},              // stere polar lat_ts form
-        {102001, -96.0, 60.0, 0.000000, 2219228.023281, 1},           // aea, DMS, datum=NAD83
     };
 
     @Test
@@ -198,12 +192,16 @@ class ProjectionTest {
         org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(3950));
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3942 - 1));
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3950 + 1));
-        // the host table covers more models than the whitelist: oblique
-        // stereographic (sterea) and Mercator entries stay rejected, the
-        // LAEA 3035 that the old hand registry refused is now supported
+        // the host table covers more models than the whitelist: sterea,
+        // sloping Mercator and Mercator entries stay rejected, and so do the
+        // models of the proj4j fallback removed in phase 2.4 (aea, laea,
+        // stere: EPSG:3035 was briefly supported in 2.3, refused again)
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(2172));
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(53004));
-        org.junit.jupiter.api.Assertions.assertNotNull(Crs.forEpsg(3035));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(23700));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3035));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3031));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(102001));
         double[] ll = Crs.forEpsg(4326).unproject(2.35, 48.85);
         org.junit.jupiter.api.Assertions.assertEquals(48.85, ll[0], 0.0);
         org.junit.jupiter.api.Assertions.assertEquals(2.35, ll[1], 0.0);

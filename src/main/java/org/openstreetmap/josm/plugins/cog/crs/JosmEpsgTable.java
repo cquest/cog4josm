@@ -22,8 +22,8 @@ import java.util.regex.Pattern;
  *
  * The PROJ string is never fed to a library as-is: tokens are parsed, then the
  * parameters feed the plugin's own projection classes (geographic, transverse
- * Mercator, Lambert conformal conic) or, for the verified subset, the proj4j
- * backend - always with explicit +a/+b (never +ellps=, see Proj4Backend).
+ * Mercator, Lambert conformal conic) - always with explicit ellipsoid
+ * construction (never the +ellps= name at computation time).
  * A code whose model is outside that whitelist stays rejected with an
  * explicit reason ({@link #reason}).
  *
@@ -165,11 +165,6 @@ final class JosmEpsgTable {
             case "lcc":
                 base = lcc(epsg, p);
                 break;
-            case "aea":
-            case "laea":
-            case "stere":
-                base = proj4j(proj, p);
-                break;
             case "merc":
                 throw new IllegalArgumentException(
                         "Mercator is not taken from the table: EPSG:3857 (Web Mercator)"
@@ -211,12 +206,12 @@ final class JosmEpsgTable {
         MODEL_TOKENS.put("utm", tokens("zone", "south"));
         MODEL_TOKENS.put("tmerc", tokens("lat_0", "lon_0", "k", "k_0", "x_0", "y_0"));
         MODEL_TOKENS.put("lcc", tokens("lat_0", "lat_1", "lat_2", "lon_0", "k", "k_0", "x_0", "y_0"));
-        MODEL_TOKENS.put("aea", tokens("lat_0", "lat_1", "lat_2", "lon_0", "x_0", "y_0"));
-        MODEL_TOKENS.put("laea", tokens("lat_0", "lon_0", "x_0", "y_0"));
-        MODEL_TOKENS.put("stere", tokens("lat_0", "lon_0", "lat_ts", "k", "k_0", "x_0", "y_0"));
         // merc tokens exist only so that the entry reaches the explicit
         // "Mercator is not taken from the table" refusal of build()
         MODEL_TOKENS.put("merc", tokens("lat_0", "lon_0", "lat_ts", "k", "k_0", "x_0", "y_0"));
+        // aea/laea/stere were served by the proj4j fallback until phase 2.3;
+        // the fallback was removed in 2.4 (pure GPL, no third-party code):
+        // these models now fall into the generic refusal of checkTokens
     }
 
     private static Set<String> tokens(String... names) {
@@ -318,67 +313,6 @@ final class JosmEpsgTable {
         return new LambertConformalConic2SP(epsg, ellipsoid(p), sp1, sp2, lat0, lon0,
                 length(p, "x_0"), length(p, "y_0"), p.containsKey("k") || p.containsKey("k_0")
                         ? scaleFactor(p) : null);
-    }
-
-    /**
-     * Albers / Lambert azimuthal / oblique-polar stereographic: proj4j backend
-     * (verified models, see {@link Proj4Backend}). The parameter string is
-     * rebuilt from parsed values - never the raw entry text.
-     */
-    private static Projection proj4j(String proj, Map<String, String> p) {
-        StringBuilder sb = new StringBuilder("+proj=").append(proj);
-        double lon0 = angle(p, "lon_0", 0.0, 540.0, false);
-        if ("aea".equals(proj)) {
-            double sp1 = angle(p, "lat_1", 0.0, 90.0, true);
-            sb.append(" +lat_1=").append(Proj4Backend.num(sp1));
-            sb.append(" +lat_2=").append(Proj4Backend.num(angle(p, "lat_2", sp1, 90.0, false)));
-            sb.append(" +lat_0=").append(Proj4Backend.num(angle(p, "lat_0", sp1, 90.0, false)));
-            sb.append(" +lon_0=").append(Proj4Backend.num(lon0));
-        } else if ("laea".equals(proj)) {
-            sb.append(" +lat_0=").append(Proj4Backend.num(angle(p, "lat_0", 0.0, 90.0, true)));
-            sb.append(" +lon_0=").append(Proj4Backend.num(lon0));
-        } else {
-            // stere: two verified forms (Proj4Backend), polar lat_ts or oblique k
-            double lat0 = angle(p, "lat_0", 0.0, 90.0, true);
-            sb.append(" +lat_0=").append(Proj4Backend.num(lat0));
-            sb.append(" +lon_0=").append(Proj4Backend.num(lon0));
-            String latTs = p.get("lat_ts");
-            boolean hasK = p.containsKey("k") || p.containsKey("k_0");
-            if (latTs != null) {
-                double ts = angle(p, "lat_ts", 0.0, 90.0, false);
-                if (Math.abs(lat0) < 90.0 - 1e-9) {
-                    throw new IllegalArgumentException("stereographic +lat_ts with lat_0="
-                            + lat0 + ": only the polar form (lat_0 = +-90) is verified");
-                }
-                if (Math.abs(ts) < 1e-12 || ts * lat0 < 0) {
-                    throw new IllegalArgumentException("polar stereographic standard parallel"
-                            + " +lat_ts=" + ts + ": inconsistent with the pole");
-                }
-                if (hasK && Math.abs(scaleFactor(p) - 1.0) > 1e-9) {
-                    throw new IllegalArgumentException("polar stereographic scale factor with"
-                            + " +lat_ts: only the k = 1 form is verified");
-                }
-                sb.append(" +lat_ts=").append(Proj4Backend.num(ts)).append(" +k_0=1");
-            } else if (hasK) {
-                // probe: at |lat_0| = 90 without lat_ts, proj4j and PROJ use
-                // different radii (factor ~2); only the oblique k_0 form was
-                // verified, the verified polar form is the lat_ts one above
-                if (Math.abs(lat0) >= 90.0 - 1e-9) {
-                    throw new IllegalArgumentException("polar stereographic without +lat_ts:"
-                            + " the proj4j port does not reproduce PROJ for the"
-                            + " k-only pole form");
-                }
-                sb.append(" +k_0=").append(Proj4Backend.num(scaleFactor(p)));
-            } else {
-                throw new IllegalArgumentException("stereographic entry without +lat_ts nor +k");
-            }
-        }
-        sb.append(" +x_0=").append(Proj4Backend.num(length(p, "x_0")));
-        sb.append(" +y_0=").append(Proj4Backend.num(length(p, "y_0")));
-        Ellipsoid ell = ellipsoid(p);
-        sb.append(" +a=").append(Proj4Backend.num(ell.semiMajorAxis));
-        sb.append(" +b=").append(Proj4Backend.num(ell.semiMajorAxis * (1.0 - ell.flattening)));
-        return Proj4Backend.fromTableDef(sb.toString(), ell);
     }
 
     private static double scaleFactor(Map<String, String> p) {
