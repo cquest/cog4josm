@@ -1,6 +1,5 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,6 +57,17 @@ public final class TiffParser {
         TYPE_SIZES[12] = 8; // DOUBLE
         TYPE_SIZES[13] = 4; // IFD
     }
+
+    /**
+     * Maximum hole between two external IFD values to still fetch them in one
+     * request (they are usually stored contiguously after the IFD).
+     */
+    private static final int VALUE_MAX_GAP = 1024;
+    /**
+     * Preferred cap of one merged metadata request; a single bigger value
+     * (tile offset arrays) gets its own request instead of being merged.
+     */
+    private static final long VALUE_MAX_BLOCK = 4L << 20;
 
     private TiffParser() {
     }
@@ -167,36 +177,80 @@ public final class TiffParser {
         return ifds;
     }
 
+    /** IFD header + entry table + next pointer in a single read. */
     private static Ifd readIfd(ByteSource src, long offset, boolean be) throws IOException {
         byte[] cnt = src.read(offset, 2);
         int n = readU16(cnt, 0, be);
-        byte[] block = src.read(offset + 2, n * 12);
-        byte[] next = src.read(offset + 2 + (long) n * 12, 4);
-        Map<Integer, IfdEntry> entries = new HashMap<>();
-        for (int i = 0; i < n; i++) {
+        byte[] block = src.read(offset + 2, n * 12 + 4);
+        byte[] next = block.length >= n * 12 + 4
+                ? Arrays.copyOfRange(block, n * 12, n * 12 + 4)
+                : new byte[4];
+        int usable = Math.min(n, block.length / 12);
+        int[] tags = new int[usable];
+        int[] types = new int[usable];
+        long[] counts = new long[usable];
+        long[] extOff = new long[usable];
+        long[] extLen = new long[usable];
+        List<long[]> ranges = new ArrayList<>();
+        for (int i = 0; i < usable; i++) {
             int p = i * 12;
-            int tag = readU16(block, p, be);
-            int type = readU16(block, p + 2, be);
-            long count = Integer.toUnsignedLong(readInt(block, p + 4, be));
-            if (type <= 0 || type >= TYPE_SIZES.length || TYPE_SIZES[type] == 0) {
+            tags[i] = readU16(block, p, be);
+            types[i] = readU16(block, p + 2, be);
+            counts[i] = Integer.toUnsignedLong(readInt(block, p + 4, be));
+            if (types[i] <= 0 || types[i] >= TYPE_SIZES.length || TYPE_SIZES[types[i]] == 0) {
+                types[i] = 0;
                 continue;
             }
-            byte[] field = Arrays.copyOfRange(block, p + 8, p + 12);
-            entries.put(tag, decodeEntry(src, type, count, field, be));
+            long total = (long) TYPE_SIZES[types[i]] * counts[i];
+            if (total > 4) {
+                extOff[i] = Integer.toUnsignedLong(readInt(block, p + 8, be));
+                extLen[i] = Math.min(total, 1L << 26);
+                ranges.add(new long[]{extOff[i], extLen[i]});
+            }
+        }
+        // external tag values are usually stored contiguously after the IFD:
+        // fetch them in merged blocks instead of one request per tag
+        List<RangePlanner.Block> blocks = RangePlanner.plan(ranges, VALUE_MAX_GAP, VALUE_MAX_BLOCK);
+        byte[][] blockData = new byte[blocks.size()][];
+        for (int b = 0; b < blocks.size(); b++) {
+            RangePlanner.Block blk = blocks.get(b);
+            blockData[b] = src.read(blk.offset, blk.length);
+        }
+        Map<Integer, IfdEntry> entries = new HashMap<>();
+        for (int i = 0; i < usable; i++) {
+            if (types[i] == 0) {
+                continue;
+            }
+            byte[] data;
+            if ((long) TYPE_SIZES[types[i]] * counts[i] <= 4) {
+                data = Arrays.copyOfRange(block, i * 12 + 8, i * 12 + 12);
+            } else {
+                data = sliceFetched(blockData, blocks, extOff[i], (int) extLen[i], src);
+            }
+            entries.put(tags[i], decodeValue(types[i], counts[i], data, be));
         }
         return new Ifd(offset, Integer.toUnsignedLong(readInt(next, 0, be)), entries);
     }
 
-    private static IfdEntry decodeEntry(ByteSource src, int type, long count, byte[] field, boolean be) throws IOException {
-        long total = TYPE_SIZES[type] * count;
-        byte[] data;
-        if (total <= 4) {
-            data = field;
-        } else {
-            long valueOffset = Integer.toUnsignedLong(readInt(field, 0, be));
-            data = src.read(valueOffset, (int) Math.min(total, 1L << 26));
+    /** Extracts one value from its pre-fetched merged block (fallback: direct read). */
+    private static byte[] sliceFetched(byte[][] blockData, List<RangePlanner.Block> blocks,
+                                       long off, int len, ByteSource fallback) throws IOException {
+        for (int b = 0; b < blocks.size(); b++) {
+            RangePlanner.Block blk = blocks.get(b);
+            if (blk.covers(off, len)) {
+                byte[] fetched = blockData[b];
+                int from = (int) (off - blk.offset);
+                int to = Math.min(from + len, fetched.length);
+                if (from >= 0 && to > from) {
+                    return Arrays.copyOfRange(fetched, from, to);
+                }
+                break;
+            }
         }
-        ByteArrayInputStream in = new ByteArrayInputStream(data);
+        return fallback.read(off, len);
+    }
+
+    private static IfdEntry decodeValue(int type, long count, byte[] data, boolean be) {
         switch (type) {
             case 2: // ASCII
                 int len = data.length;

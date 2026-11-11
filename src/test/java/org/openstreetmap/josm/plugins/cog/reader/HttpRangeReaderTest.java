@@ -1,6 +1,8 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -141,6 +143,50 @@ class HttpRangeReaderTest {
         assertEquals("/image.tif", path);
         try (CogReader r = CogReader.open(url("/image.tif"))) {
             assertEquals(3857, r.info().crsCode);
+        }
+    }
+
+    @Test
+    void mergesMetadataReadsIntoFewRequests() throws IOException {
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            r.getTile(0, 2, 2);
+            assertTrue(fullHits.get() == 0, "no full download");
+            // probe + header + 2 IFD blocks + merged value blocks + tile:
+            // well under the one-request-per-tag era (~30 requests)
+            assertTrue(rangeHits.get() <= 12, "merged byte-ranges: " + rangeHits.get());
+        }
+    }
+
+    @Test
+    void secondOpenServesMetadataFromLruCache() throws IOException {
+        try (CogReader r1 = CogReader.open(url("/image.tif"))) {
+            assertEquals(3857, r1.info().crsCode);
+        }
+        int afterFirst = rangeHits.get();
+        try (CogReader r2 = CogReader.open(url("/image.tif"))) {
+            assertEquals(3857, r2.info().crsCode);
+            assertEquals(1, rangeHits.get() - afterFirst,
+                    "only the size/ETag probe reaches the network");
+            // raster content is never served from the metadata cache
+            r2.getTile(0, 2, 2);
+            assertEquals(afterFirst + 2, rangeHits.get());
+        }
+    }
+
+    @Test
+    void batchGetCoalescesAdjacentTiles() throws IOException {
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            int before = rangeHits.get();
+            java.util.Map<Long, BufferedImage> tiles = r.getTiles(0, 1, 2, 1, 2);
+            assertEquals(4, tiles.size());
+            int used = rangeHits.get() - before;
+            assertTrue(used <= 2, "adjacent tiles fetched as one block: " + used);
+            BufferedImage t = tiles.get(CogReader.tileKey(1, 2));
+            assertNotNull(t);
+            assertEquals(16, t.getWidth());
+            int cached = rangeHits.get();
+            assertSame(t, r.getTile(0, 1, 2), "decoded tile kept in the tile cache");
+            assertEquals(cached, rangeHits.get());
         }
     }
 }

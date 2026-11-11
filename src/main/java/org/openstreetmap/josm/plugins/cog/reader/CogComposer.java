@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.util.Map;
 
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
 
@@ -193,14 +194,12 @@ public final class CogComposer {
             int tx1 = (px0 + windowW - 1) / level.tileWidth;
             int ty0 = py0 / level.tileHeight;
             int ty1 = (py0 + windowH - 1) / level.tileHeight;
-            for (int ty = ty0; ty <= ty1; ty++) {
-                for (int tx = tx0; tx <= tx1; tx++) {
-                    if (!level.hasTile(tx, ty)) {
-                        continue;
-                    }
-                    BufferedImage tile = reader.getTile(levelIndex, tx, ty);
-                    g.drawImage(tile, tx * level.tileWidth - px0, ty * level.tileHeight - py0, null);
-                }
+            Map<Long, BufferedImage> tiles = reader.getTiles(levelIndex, tx0, tx1, ty0, ty1);
+            for (Map.Entry<Long, BufferedImage> e : tiles.entrySet()) {
+                long key = e.getKey();
+                int tx = (int) key;
+                int ty = (int) (key >>> 32);
+                g.drawImage(e.getValue(), tx * level.tileWidth - px0, ty * level.tileHeight - py0, null);
             }
         } finally {
             g.dispose();

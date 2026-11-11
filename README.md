@@ -22,6 +22,14 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   décalage de l'origine géoréférencée.
 * Décodeurs TIFF intégrés : pas (1), Deflate (8/32946), PackBits (32773),
   LZW (5), JPEG (6, via ImageIO). Gris 8/16 bits, RGB(A), predictor horizontal.
+* Requêtes groupées : les petites plages (balises d'un IFD, tuiles voisines
+  d'une fenêtre) sont fusionnées en quelques requêtes `Range:` par bloc, sur
+  le modèle de l'I/O recouvrant de GDAL — environ 2 à 4 requêtes par tuile
+  d'affichage au lieu d'une par tuile source.
+* Cache LRU des **seules métadonnées** (en-tête, IFD, tables de décalages de
+  tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
+  qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
+  octets bruts (seulement en images décodées).
 * Pas de dépendance externe : uniquement le JDK et l'API JOSM.
 
 ## État (v0.1)
@@ -29,6 +37,8 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Fonctionnalité | État |
 |---|---|
 | Lecture byte-ranges + sonde `Range:` | ✅ |
+| Groupement des petites plages en requêtes par bloc | ✅ |
+| Cache LRU metadata (jamais le raster brut) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Pyramide multi-niveaux, choix du meilleur niveau | ✅ |
 | Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |

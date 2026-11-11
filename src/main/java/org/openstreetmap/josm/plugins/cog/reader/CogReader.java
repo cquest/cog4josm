@@ -2,19 +2,33 @@ package org.openstreetmap.josm.plugins.cog.reader;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import java.awt.image.BufferedImage;
 
 /**
- * Entry point: opens a COG through a {@link ByteSource}, parses the headers,
- * then provides the decoded tiles with an in-memory LRU cache.
+ * Entry point: opens a COG through a {@link ByteSource}, parses the headers
+ * (metadata reads served by the global {@link MetadataCache} for HTTP
+ * sources), then provides decoded tiles with an in-memory LRU cache.
+ *
+ * <p>Tiles of one request window are fetched through
+ * {@link RangePlanner}-merged byte-ranges: COG tiles are stored row-major and
+ * are usually contiguous, so adjacent tiles of a window cost one HTTP request
+ * per block instead of one per tile. Raw raster bytes are never cached —
+ * only the decoded images are.</p>
  */
 public final class CogReader implements Closeable {
 
     private static final int MAX_CACHED_TILES = 128;
+    /** Maximum hole between two tile ranges to still fetch them together. */
+    private static final int FETCH_MAX_GAP = 512;
+    /** Preferred cap of one merged tile fetch (bigger tiles keep their own request). */
+    private static final int FETCH_MAX_BLOCK = 1 << 20;
 
     private final ByteSource source;
     private final CogInfo info;
@@ -36,16 +50,17 @@ public final class CogReader implements Closeable {
             http.close();
             throw new RangeNotSupportedException(url);
         }
-        return new CogReader(http);
+        MetadataCache.global().validate(url, http.size(), http.etag());
+        return new CogReader(http, TiffParser.parse(new MetadataCachingSource(http)));
     }
 
     public static CogReader open(ByteSource source) throws IOException {
-        return new CogReader(source);
+        return new CogReader(source, TiffParser.parse(source));
     }
 
-    private CogReader(ByteSource source) throws IOException {
+    private CogReader(ByteSource source, CogInfo info) {
         this.source = source;
-        this.info = TiffParser.parse(source);
+        this.info = info;
     }
 
     public CogInfo info() {
@@ -56,6 +71,11 @@ public final class CogReader implements Closeable {
         return source;
     }
 
+    /** Key of the map returned by {@link #getTiles}: packs a tile column and row. */
+    public static long tileKey(int tx, int ty) {
+        return ((long) ty << 32) | (tx & 0xffffffffL);
+    }
+
     /** Decoded tile of level {@code level} at tile position (tx, ty). */
     public BufferedImage getTile(int level, int tx, int ty) throws IOException {
         CogInfo.Level lvl = info.level(level);
@@ -63,15 +83,54 @@ public final class CogReader implements Closeable {
             throw new IOException("Tile outside the pyramid: level " + level + " tile " + tx + "," + ty
                     + " (" + lvl.numXTiles() + "x" + lvl.numYTiles() + ")");
         }
-        String key = level + "/" + tx + "/" + ty;
-        BufferedImage cached = tileCache.get(key);
-        if (cached != null) {
-            return cached;
+        return getTiles(level, tx, tx, ty, ty).get(tileKey(tx, ty));
+    }
+
+    /**
+     * Decoded tiles of the inclusive rectangle [tx0..tx1] x [ty0..ty1] of one
+     * level, missing ones fetched with merged byte-range requests. Tiles off
+     * the pyramid are skipped; results are keyed by {@link #tileKey}.
+     */
+    public Map<Long, BufferedImage> getTiles(int level, int tx0, int tx1, int ty0, int ty1)
+            throws IOException {
+        CogInfo.Level lvl = info.level(level);
+        Map<Long, BufferedImage> out = new LinkedHashMap<>();
+        List<long[]> ranges = new ArrayList<>();
+        List<int[]> coords = new ArrayList<>();
+        for (int ty = Math.max(0, ty0); ty <= ty1; ty++) {
+            for (int tx = Math.max(0, tx0); tx <= tx1; tx++) {
+                if (!lvl.hasTile(tx, ty)) {
+                    continue;
+                }
+                long key = tileKey(tx, ty);
+                if (out.containsKey(key)) {
+                    continue;
+                }
+                BufferedImage cached = tileCache.get(level + "/" + tx + "/" + ty);
+                if (cached != null) {
+                    out.put(key, cached);
+                    continue;
+                }
+                ranges.add(new long[]{lvl.tileOffset(tx, ty), lvl.tileByteCount(tx, ty)});
+                coords.add(new int[]{tx, ty});
+            }
         }
-        byte[] raw = source.read(lvl.tileOffset(tx, ty), (int) lvl.tileByteCount(tx, ty));
-        BufferedImage img = TileDecoder.decode(lvl, raw);
-        tileCache.put(key, img);
-        return img;
+        if (!ranges.isEmpty()) {
+            for (RangePlanner.Block b : RangePlanner.plan(ranges, FETCH_MAX_GAP, FETCH_MAX_BLOCK)) {
+                byte[] data = source.read(b.offset, b.length);
+                for (int idx : b.members) {
+                    long[] r = ranges.get(idx);
+                    int[] c = coords.get(idx);
+                    int from = (int) (r[0] - b.offset);
+                    byte[] raw = Arrays.copyOfRange(data, from,
+                            Math.min(from + (int) r[1], data.length));
+                    BufferedImage img = TileDecoder.decode(lvl, raw);
+                    tileCache.put(level + "/" + c[0] + "/" + c[1], img);
+                    out.put(tileKey(c[0], c[1]), img);
+                }
+            }
+        }
+        return out;
     }
 
     public void clearCache() {

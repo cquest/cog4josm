@@ -71,6 +71,15 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   GeoKeys (including 34736 doubles) when the SRID is 0 or 32767;
   `CogTileSource` resolves the projection as soon as it receives the
   `CogInfo` and keeps the error to display it at tile load time.
+- **I/O strategy** (`reader/`): `RangePlanner` merges small byte-ranges into
+  few larger requests (external IFD tag values fetched in one block per IFD;
+  adjacent COG tiles of a window fetched one block per row — they are stored
+  row-major). `MetadataCache` (global LRU, keyed by URL + exact range,
+  validated by size/ETag fingerprint at open) caches **metadata only** —
+  header, IFDs, tile offset arrays — never raw raster: tiles are fetched
+  coalesced and kept only as decoded images (`CogReader` cache).
+  Rule: any new read path must choose deliberately between the metadata
+  cache (`MetadataCachingSource`) and the direct source; never cache pixels.
 - `layer/`: JOSM integration. `CogImageryLayer` extends
   `AbstractCachedTileSourceLayer<CogTileSource>`; `CogTileSource` is a TMS
   source without URL (on-the-fly synthesis) that **carries the `CogReader`**;
