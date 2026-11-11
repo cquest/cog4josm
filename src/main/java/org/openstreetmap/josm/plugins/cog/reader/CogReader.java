@@ -24,9 +24,9 @@ import java.awt.image.BufferedImage;
  */
 public final class CogReader implements Closeable {
 
-    private static final int MAX_CACHED_TILES = 128;
+    private static final int MAX_CACHED_TILES = 256;
     /** Maximum hole between two tile ranges to still fetch them together. */
-    private static final int FETCH_MAX_GAP = 512;
+    private static final int FETCH_MAX_GAP = 4096;
     /** Preferred cap of one merged tile fetch (bigger tiles keep their own request). */
     private static final int FETCH_MAX_BLOCK = 1 << 20;
 

@@ -66,7 +66,7 @@ public final class TiffParser {
      * Maximum hole between two external IFD values to still fetch them in one
      * request (they are usually stored contiguously after the IFD).
      */
-    private static final int VALUE_MAX_GAP = 1024;
+    private static final int VALUE_MAX_GAP = 4096;
     /**
      * Preferred cap of one merged metadata request; a single bigger value
      * (tile offset arrays) gets its own request instead of being merged.
