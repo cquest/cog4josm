@@ -105,11 +105,26 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   header, IFDs, tile offset arrays — never raw raster: tiles are fetched
   coalesced and kept only as decoded images (`CogReader` cache).
   Rule: any new read path must choose deliberately between the metadata
-  cache (`MetadataCachingSource`) and the direct source; never cache pixels.
+  cache (`MetadataCachingSource`) and the direct source; never cache pixels
+  **in the reader**. Composed 256 px display tiles are a different thing:
+  they go into JOSM's own imagery tile cache (see `layer/` below), never
+  raw COG bytes.
 - `layer/`: JOSM integration. `CogImageryLayer` extends
   `AbstractCachedTileSourceLayer<CogTileSource>`; `CogTileSource` is a TMS
   source without URL (on-the-fly synthesis) that **carries the `CogReader`**;
-  `CogTileLoaderJob` retrieves the reader via `tile.getSource()`.
+  `CogTileLoaderJob` retrieves the reader via `tile.getSource()`. Since
+  phase 2.5 the composed tiles are kept in the layer's JCS region "cog"
+  (`CogImageryLayer.tileCacheRegion()` = `AbstractCachedTileSourceLayer
+  .getCache(name)`, the very region the JOSM host uses for TMS layers:
+  memory + disk spool + purge actions for free). Key =
+  `fingerprint/zoom/x/y` where the fingerprint (computed once per
+  `CogTileSource`) is SHA-256(url + size + ETag) first 16 hex chars — the
+  same identity trio as `MetadataCache.validate`, so a changed remote file
+  never serves stale tiles. Entries are `BufferedImageCacheEntry
+  .pngEncoded(img)` (the only serializable form; the decoded image is
+  transient). Never cached: error tiles, CRS-error tiles, tiles that miss
+  the COG (compose returns null) or come out fully transparent
+  (`CogTileLoaderJob.isBlank`); a cache failure never fails the tile.
 - `AddCogLayerAction`: URL dialog + open + zoom to the extent.
 - `crs/`: in-house projections (Snyder / USGS PP 1312, sub-mm accuracy in the
   forward direction, validated against GDAL/PROJ in `ProjectionTest`).
@@ -274,6 +289,39 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   3084-3087 false-origin group is an accepted fallback). Documented in
   `CustomCrs` for error messages; nothing computes with them today.
 
+## Display tile cache pitfalls (phase 2.5, measured on r19678)
+
+- **`Tile` constructor argument order**: `org.openstreetmap.gui.jmapviewer.Tile
+  (source, x, y, zoom)` — NOT `(source, zoom, x, y)`. Swapped, the zoom
+  becomes a tile index: `MercatorTiles.tileBounds` divides by
+  `Math.pow(2, huge)` = Infinity, returns a degenerate box and
+  `CogComposer.compose` quietly returns null (this trap cost a debugging
+  session when the first cache tests were written).
+- `Tile.getImage()` is a plain field read, and the 4-arg constructor sets
+  `image = LOADING_IMAGE` (a 255x255 ARGB placeholder): a loaded tile whose
+  composition returned null still shows a non-null placeholder — never
+  infer "has content" from `getImage() != null`.
+- `AbstractCachedTileSourceLayer` has a **public static `getCache(String)`**
+  that returns the very JCS region its private instance `getCache()` uses
+  (both route to `JCSCacheManager.getCache(name, MAX_DISK_CACHE_SIZE...)`):
+  that is what `CogImageryLayer.tileCacheRegion()` calls. Standalone probes
+  must first `Config.setPreferencesInstance(new MemoryPreferences())` and
+  `Config.setBaseDirectoriesProvider(...)` or class init NPEs.
+- JCS3 signatures to respect when faking `ICacheAccess` with a
+  `java.lang.reflect.Proxy` (the pattern used by `CogTileCacheTest`):
+  `ICache.put(K,V)` returns **boolean** (returning null through the proxy
+  raises a swallowed ClassCastException — silent missing puts),
+  `CacheAccess.remove(K)` returns void. Only `get`/`put`/`remove` are ever
+  called by the plugin.
+- Never cache: error tiles, CRS-error tiles, tiles whose composition is
+  null (miss the COG) or fully transparent (`CogTileLoaderJob.isBlank`);
+  all cache exceptions are swallowed — a cache failure must never fail a
+  good tile. A corrupt entry read back is treated as a miss and removed.
+- Persistable form: `BufferedImageCacheEntry.pngEncoded(img)`; the decoded
+  image is transient, so the JOSM disk spool (`tiles` dir) stays safe;
+  re-decode via `getImage()` on hit. PNG is lossless: round-trip is
+  pixel-identical (asserted in `CogTileCacheTest`).
+
 ## Host EPSG table pitfalls (phase 2.3, measured against PROJ 9.9)
 
 - **Linear units in PROJ strings**: `+x_0`/`+y_0` are metres but the whole
@@ -405,5 +453,10 @@ Phase 2.4 (done): proj4j dependency and embedded classes removed, project
 back under pure GPL v2+ (no third-party code in the jar); models aea/laea/
 stere (table) and GeoKeys methods 10/11/28/14-stere/15/9815 refused with
 an explicit reason.
+Phase 2.5 (done): composed display tiles are kept in JOSM's own imagery
+tile cache — JCS region "cog" injected into `CogTileLoader`, key
+fingerprint(url+size+etag)+"/z/x/y", PNG-encoded `BufferedImageCacheEntry`
+(memory + disk spool, JOSM purge actions apply); error/blank tiles never
+cached. Raw COG bytes remain outside any cache (principle unchanged).
 Phase 3: publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

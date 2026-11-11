@@ -1,6 +1,11 @@
 package org.openstreetmap.josm.plugins.cog.layer;
 
 import java.awt.Point;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 
 import org.openstreetmap.gui.jmapviewer.Coordinate;
@@ -16,9 +21,11 @@ import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.plugins.cog.crs.Crs;
 import org.openstreetmap.josm.plugins.cog.crs.Geographic;
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
+import org.openstreetmap.josm.plugins.cog.reader.ByteSource;
 import org.openstreetmap.josm.plugins.cog.reader.CogInfo;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
 import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
+import org.openstreetmap.josm.plugins.cog.reader.HttpRangeReader;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 
 /**
@@ -35,6 +42,8 @@ public class CogTileSource extends AbstractTMSTileSource {
     private final OsmMercator mercator;
     private final int minZoom;
     private final int maxZoom;
+    /** Identity of this COG revision, prefix of the JOSM tile cache keys (see {@link #cacheKey}). */
+    private final String cacheFingerprint;
     /** COG projection (resolved on demand, null for 3857/4326 on the linear path). */
     private volatile Projection projection;
     /** Error message when the COG's custom system could not be resolved (null otherwise). */
@@ -44,6 +53,7 @@ public class CogTileSource extends AbstractTMSTileSource {
         super(info);
         this.reader = reader;
         this.cogInfo = reader.info();
+        this.cacheFingerprint = fingerprint(info.getUrl(), reader.source());
         info.setTileSize(256);
         this.mercator = new OsmMercator(info.getTileSize());
         this.minZoom = 0;
@@ -121,6 +131,44 @@ public class CogTileSource extends AbstractTMSTileSource {
     @Override
     public String getTileId(int zoom, int x, int y) {
         return getId() + "/" + zoom + "/" + x + "/" + y;
+    }
+
+    // ------------------------------------------------------------ tile cache
+
+    /**
+     * Identity of this COG revision: URL + size + ETag, hashed. Used by
+     * {@link CogTileLoaderJob} as prefix of the JOSM tile cache keys: when
+     * the remote file changes (size or ETag), the fingerprint changes and
+     * stale composed tiles are never served again.
+     */
+    public String getCacheFingerprint() {
+        return cacheFingerprint;
+    }
+
+    /** JOSM tile cache key of one tile position (fingerprint + z/x/y). */
+    String cacheKey(int zoom, int x, int y) {
+        return cacheFingerprint + "/" + zoom + "/" + x + "/" + y;
+    }
+
+    static String fingerprint(String url, ByteSource source) {
+        long size = -1;
+        try {
+            size = source.size();
+        } catch (IOException | RuntimeException e) {
+            // unknown size: the fingerprint keeps the smaller identity
+        }
+        String etag = source instanceof HttpRangeReader h && h.etag() != null ? h.etag() : "";
+        return fingerprint(url == null ? "" : url, size, etag);
+    }
+
+    static String fingerprint(String url, long size, String etag) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((url + '\0' + size + '\0' + etag).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 8);
+        } catch (NoSuchAlgorithmException e) {
+            throw new AssertionError("SHA-256 is required by the Java specification", e);
+        }
     }
 
     // ------------------------------------------------------------ projections

@@ -4,12 +4,15 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Writer for small tiled TIFFs (COG-like) that are valid for tests. */
-final class TestTiffWriter {
+/**
+ * Writer for small tiled TIFFs (COG-like) that are valid for tests.
+ * Public: shared with tests of other packages (layer/).
+ */
+public final class TestTiffWriter {
 
     static final int TILE = 16;
 
-    record LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey) {
+    public record LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey) {
     }
 
     /** Reference pixel: deterministic function of image coordinates. */
@@ -17,7 +20,7 @@ final class TestTiffWriter {
         return (x * 7 + y * 13 + channel * 31 + 5) & ((1 << bits) - 1);
     }
 
-    static byte[] write(List<LevelSpec> levels, int crs, double scaleX, double originX, double originY)
+    public static byte[] write(List<LevelSpec> levels, int crs, double scaleX, double originX, double originY)
             throws java.io.IOException {
         return write(levels, crs, null, null, scaleX, originX, originY);
     }
@@ -27,7 +30,7 @@ final class TestTiffWriter {
      * content of the 34735 directory (4-short header + entries), {@code customDoubles}
      * the DOUBLE array of tag 34736 (may be null/empty).
      */
-    static byte[] write(List<LevelSpec> levels, int crs, int[] customKeys, double[] customDoubles,
+    public static byte[] write(List<LevelSpec> levels, int crs, int[] customKeys, double[] customDoubles,
                         double scaleX, double originX, double originY) throws java.io.IOException {
         int nl = levels.size();
         int nCustomKeys = customKeys == null ? 0 : customKeys.length;

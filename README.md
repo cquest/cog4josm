@@ -31,6 +31,11 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   validated by size/ETag: reopening the same COG costs a single probe
   request. Raster content is never cached as raw bytes (only as decoded
   images).
+* The composed 256 px display tiles go into **JOSM's own imagery tile
+  cache** (the "cog" JCS region: JOSM memory management and disk tile
+  cache, purged by the usual JOSM actions). Keys combine a fingerprint of
+  the source (URL + size + ETag) with z/x/y, so a changed file never
+  serves stale tiles; error and empty tiles are never cached.
 * Minimal dependencies: **JDK + JOSM API only**. The plugin jar contains no
   third-party code (GPL v2+ only). CRS parameters always come from the file
   itself (GeoKeys) or from the projection table shipped by JOSM — the
@@ -44,6 +49,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Byte-range reads + `Range:` probe | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Metadata LRU cache (never raw raster) | ✅ |
+| Composed display tiles in JOSM's tile cache (memory + disk) | ✅ |
 | TIFF/GeoTIFF parser (IFD, sub-IFD, GeoKeys) | ✅ |
 | BigTIFF container (64-bit offsets, PIX4Dmatic files) | ✅ |
 | Interleaved alpha-mask IFDs (photometric 4) | detected, skipped (compositing later) |

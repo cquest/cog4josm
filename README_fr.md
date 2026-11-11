@@ -32,6 +32,12 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
   qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
   octets bruts (seulement en images décodées).
+* Les tuiles d'affichage 256 px composées sont stockées dans **le cache
+  d'imagerie intégré de JOSM** (région JCS « cog » : gestion mémoire JOSM
+  et cache tuiles sur disque, vidé par les actions JOSM habituelles).
+  Les clés combinent une empreinte de la source (URL + taille + ETag) et
+  z/x/y : un fichier modifié ne ressert jamais de tuiles périmées ; les
+  tuiles d'erreur et les tuiles vides ne sont jamais mises en cache.
 * Dépendances minimales : **JDK + API JOSM uniquement**. Le jar du plugin
   ne contient aucun code tiers (GPL v2+ pure). Les paramètres des CRS
   viennent toujours du fichier lui-même (GeoKeys) ou de la table de
