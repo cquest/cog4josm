@@ -34,10 +34,15 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   d'une fenêtre) sont fusionnées en quelques requêtes `Range:` par bloc, sur
   le modèle de l'I/O recouvrant de GDAL — environ 2 à 4 requêtes par tuile
   d'affichage au lieu d'une par tuile source.
+* Lecture spéculative d'en-tête : l'ouverture d'une source HTTP n'émet
+  qu'une seule requête `bytes=0-32767`, qui prouve le support de `Range:`
+  (plus de requête de sonde), révèle taille et ETag, et apporte en un aller
+  simple l'en-tête, les IFD et les GeoKeys d'un COG bien agencé.
 * Cache LRU des **seules métadonnées** (en-tête, IFD, tables de décalages de
-  tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
-  qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
-  octets bruts (seulement en images décodées).
+  tuiles), validé par taille/ETag et consulté par containment (un bloc plus
+  grand sert les lectures plus petites) : une réouverture du même COG ne
+  coûte que cette requête tête. Le contenu raster n'est jamais mis en cache
+  en octets bruts (seulement en images décodées).
 * Les tuiles d'affichage 256 px composées sont stockées dans **le cache
   d'imagerie intégré de JOSM** (région JCS « cog » : gestion mémoire JOSM
   et cache tuiles sur disque, vidé par les actions JOSM habituelles).
@@ -55,7 +60,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 
 | Fonctionnalité | État |
 |---|---|
-| Lecture byte-ranges + sonde `Range:` | ✅ |
+| Lecture byte-ranges, une seule lecture tête à l'ouverture | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Cache LRU metadata (jamais le raster brut) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
@@ -138,7 +143,7 @@ acceptable pour un fond cartographique.
 src/main/java/org/openstreetmap/josm/plugins/cog/
 ├── CogPlugin, AddCogLayerAction    entrée du plugin (action « ajouter un calque COG »)
 ├── reader/                         lecture des COG, sans dépendance à JOSM
-│   ├── ByteSource, HttpRangeReader lecture par HTTP byte-ranges (sonde, ETag, retries)
+│   ├── ByteSource, HttpRangeReader lecture par HTTP byte-ranges (taille/ETag apprises, retries)
 │   ├── TiffParser, CogInfo         parseur TIFF/BigTIFF + GeoKeys (pyramide, géoréférence)
 │   ├── RangePlanner                fusion des petites plages en requêtes par bloc
 │   ├── MetadataCache, MetadataCachingSource

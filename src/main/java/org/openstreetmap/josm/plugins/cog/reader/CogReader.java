@@ -14,7 +14,8 @@ import java.awt.image.BufferedImage;
 /**
  * Entry point: opens a COG through a {@link ByteSource}, parses the headers
  * (metadata reads served by the global {@link MetadataCache} for HTTP
- * sources), then provides decoded tiles with an in-memory LRU cache.
+ * sources, pre-seeded by one speculative head read), then provides decoded
+ * tiles with an in-memory LRU cache.
  *
  * <p>Tiles of one request window are fetched through
  * {@link RangePlanner}-merged byte-ranges: COG tiles are stored row-major and
@@ -29,6 +30,15 @@ public final class CogReader implements Closeable {
     private static final int FETCH_MAX_GAP = 4096;
     /** Preferred cap of one merged tile fetch (bigger tiles keep their own request). */
     private static final int FETCH_MAX_BLOCK = 1 << 20;
+    /**
+     * Speculative head read done when opening an HTTP source: one request
+     * brings the header, IFDs, GeoKeys and tile-offset tables of a
+     * normatively laid-out COG (they all sit at the head of the file), so
+     * parsing the metadata usually costs this single round-trip. It also
+     * replaces the old one-byte range probe: the 206 answer reveals the
+     * total size and the ETag, a 200 answer proves ranges are unsupported.
+     */
+    static final int HEAD_READ_BYTES = 1 << 15;
 
     private final ByteSource source;
     private final CogInfo info;
@@ -46,12 +56,21 @@ public final class CogReader implements Closeable {
 
     public static CogReader open(String url, Map<String, String> headers) throws IOException {
         HttpRangeReader http = HttpRangeReader.open(url, headers);
-        if (!http.supportsRanges()) {
+        try {
+            // one speculative head read (no probe): the 206 answer validates
+            // range support and reveals size/ETag, a 200 answer throws
+            // RangeNotSupportedException before anything big is buffered
+            byte[] head = http.read(0, HEAD_READ_BYTES);
+            MetadataCache cache = MetadataCache.global();
+            cache.validate(url, http.size(), http.etag());
+            // seed the metadata cache: parsing below slices this block
+            // whenever it covers the requested ranges
+            cache.store(url, 0, head);
+            return new CogReader(http, TiffParser.parse(new MetadataCachingSource(http)));
+        } catch (IOException | RuntimeException e) {
             http.close();
-            throw new RangeNotSupportedException(url);
+            throw e;
         }
-        MetadataCache.global().validate(url, http.size(), http.etag());
-        return new CogReader(http, TiffParser.parse(new MetadataCachingSource(http)));
     }
 
     public static CogReader open(ByteSource source) throws IOException {

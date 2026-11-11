@@ -11,9 +11,14 @@ import java.util.Objects;
  * tile content must never go through this cache — it is fetched on demand
  * and only kept as decoded images by {@link CogReader}.
  *
- * <p>Entries are keyed by source URL plus exact (offset, length). The cache
- * is validated on each new open with a (size, ETag) fingerprint: a changed
- * fingerprint drops everything cached for that URL.</p>
+ * <p>Entries are blocks keyed by source URL plus their exact (offset, byte
+ * count). A lookup first tries the exact range, then slices any cached block
+ * of the same URL that fully covers the requested range: the speculative
+ * head read done by {@link CogReader#open(String, Map)} can thus serve every
+ * metadata read of a well-laid-out COG without further requests.</p>
+ *
+ * <p>The cache is validated on each new open with a (size, ETag) fingerprint:
+ * a changed fingerprint drops everything cached for that URL.</p>
  */
 public final class MetadataCache {
 
@@ -33,9 +38,22 @@ public final class MetadataCache {
         }
     }
 
+    /** Cached bytes of [offset, offset + data.length) within one URL. */
+    private static final class Block {
+        final String url;
+        final long offset;
+        final byte[] data;
+
+        Block(String url, long offset, byte[] data) {
+            this.url = url;
+            this.offset = offset;
+            this.data = data;
+        }
+    }
+
     private final long maxTotalBytes;
     private final int maxEntryBytes;
-    private final Map<String, byte[]> entries = new LinkedHashMap<String, byte[]>(64, 0.75f, true);
+    private final Map<String, Block> entries = new LinkedHashMap<String, Block>(64, 0.75f, true);
     private final Map<String, Fingerprint> fingerprints = new HashMap<>();
     private long totalBytes;
 
@@ -48,22 +66,38 @@ public final class MetadataCache {
         this.maxEntryBytes = maxEntryBytes;
     }
 
-    /** Cached bytes for this exact range, or null on a miss (defensive copy). */
+    /**
+     * Cached bytes for (offset, length): exact hit, else a slice of any
+     * cached block of this URL covering the whole range; null on a miss.
+     * The result is always a defensive copy.
+     */
     public synchronized byte[] lookup(String url, long offset, int length) {
-        byte[] v = entries.get(key(url, offset, length));
-        return v == null ? null : v.clone();
+        Block exact = entries.get(key(url, offset, length));
+        if (exact != null) {
+            return exact.data.clone();
+        }
+        for (Block b : entries.values()) {
+            if (b.url.equals(url) && b.offset <= offset && b.data.length >= length
+                    && b.offset + b.data.length >= offset + length) {
+                byte[] slice = new byte[length];
+                System.arraycopy(b.data, (int) (offset - b.offset), slice, 0, length);
+                return slice;
+            }
+        }
+        return null;
     }
 
     /** Stores a freshly read metadata block (oversized blocks are skipped). */
-    public synchronized void store(String url, long offset, int length, byte[] data) {
+    public synchronized void store(String url, long offset, byte[] data) {
         if (data == null || data.length == 0 || data.length > maxEntryBytes) {
             return;
         }
-        entries.put(key(url, offset, length), data.clone());
-        totalBytes += data.length;
+        byte[] copy = data.clone();
+        Block previous = entries.put(key(url, offset, copy.length), new Block(url, offset, copy));
+        totalBytes += copy.length - (previous == null ? 0 : previous.data.length);
         while (totalBytes > maxTotalBytes && !entries.isEmpty()) {
-            Map.Entry<String, byte[]> eldest = entries.entrySet().iterator().next();
-            totalBytes -= eldest.getValue().length;
+            Map.Entry<String, Block> eldest = entries.entrySet().iterator().next();
+            totalBytes -= eldest.getValue().data.length;
             entries.remove(eldest.getKey());
         }
     }
@@ -81,10 +115,9 @@ public final class MetadataCache {
     }
 
     public synchronized void clearUrl(String url) {
-        String prefix = url + '\u0000';
         entries.entrySet().removeIf(e -> {
-            if (e.getKey().startsWith(prefix)) {
-                totalBytes -= e.getValue().length;
+            if (e.getValue().url.equals(url)) {
+                totalBytes -= e.getValue().data.length;
                 return true;
             }
             return false;

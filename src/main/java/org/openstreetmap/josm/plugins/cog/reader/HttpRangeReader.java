@@ -19,8 +19,11 @@ import java.util.regex.Pattern;
 
 /**
  * Partial HTTP read of a remote resource through the {@code Range: bytes=...} header.
- * Probes range support only once (GET {@code bytes=0-0}), caches the
- * size and the ETag, retries on 5xx errors.
+ * No request is made up front: every 206 response reveals the total size
+ * ({@code Content-Range}) and the ETag, and a 200 answer to a Range request is
+ * the proof the server does not support ranges ({@link RangeNotSupportedException}).
+ * A one-byte probe (GET {@code bytes=0-0}) remains only as the fallback used
+ * when {@link #size()} is asked before any read. Retries on 5xx errors.
  */
 public final class HttpRangeReader implements ByteSource {
 
@@ -53,11 +56,12 @@ public final class HttpRangeReader implements ByteSource {
                 .build();
     }
 
-    /** Builds the reader and immediately checks the size + range support. */
-    public static HttpRangeReader open(String url, Map<String, String> extraHeaders) throws IOException {
-        HttpRangeReader reader = new HttpRangeReader(url, extraHeaders);
-        reader.probe();
-        return reader;
+    /**
+     * Builds the reader without any request: the first ranged read validates
+     * the server and reveals the size/ETag (see the class javadoc).
+     */
+    public static HttpRangeReader open(String url, Map<String, String> extraHeaders) {
+        return new HttpRangeReader(url, extraHeaders);
     }
 
     public String url() {
@@ -134,14 +138,12 @@ public final class HttpRangeReader implements ByteSource {
 
     @Override
     public byte[] read(long offset, int length) throws IOException {
-        probe();
-        if (!rangesSupported) {
-            throw new RangeNotSupportedException(uri.toString());
-        }
-        if (offset >= size) {
+        if (size >= 0 && offset >= size) {
             return new byte[0];
         }
-        int count = (int) Math.min(length, size - offset);
+        // size unknown yet: ask the full length, the server clamps at the end
+        // of the file and fetchRange validates and learns from the response
+        int count = size >= 0 ? (int) Math.min(length, size - offset) : length;
         IOException last = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
@@ -149,6 +151,9 @@ public final class HttpRangeReader implements ByteSource {
             } catch (ShortReadException e) {
                 last = e;
                 sleepBeforeRetry(attempt);
+            } catch (ProtocolViolationException e) {
+                // no compliant server would send this twice: fail fast
+                throw e;
             } catch (IOException e) {
                 last = e;
                 if (attempt == MAX_ATTEMPTS) {
@@ -183,19 +188,47 @@ public final class HttpRangeReader implements ByteSource {
         }
         String cr = header(resp, "Content-Range");
         Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
-        if (m != null && m.matches() && Long.parseLong(m.group(1)) != offset) {
-            throw new IOException("Inconsistent Content-Range for " + uri + ": " + cr);
+        boolean validCr = m != null && m.matches();
+        if (validCr && Long.parseLong(m.group(1)) != offset) {
+            throw new ProtocolViolationException("Inconsistent Content-Range for " + uri + ": " + cr);
         }
         byte[] body = resp.body() == null ? new byte[0] : resp.body();
         if (body.length > count) {
             // the copy was capped at count+1: the server sent more than requested
-            throw new IOException("Server sent more than the requested range ("
-                    + count + " bytes) on " + uri);
+            throw new ProtocolViolationException("206 on " + uri + " with an unexpectedly large body ("
+                    + count + " bytes requested)");
         }
         if (body.length < count) {
-            throw new ShortReadException("Incomplete range (" + body.length + "/" + count + ") on " + uri);
+            if (!validCr) {
+                // partial body with a missing or broken Content-Range: hostile
+                // or corrupt server, not a transient failure - no retry loop
+                throw new ProtocolViolationException("206 response with no valid Content-Range for " + uri);
+            }
+            if (Long.parseLong(m.group(2)) != offset + body.length - 1) {
+                throw new ShortReadException("Incomplete range (" + body.length + "/" + count + ") on " + uri);
+            }
+            // legitimate clamp at the end of the file: the response reveals
+            // the total size, exactly like the removed probe
+            learn(resp, m);
+            return body;
         }
+        learn(resp, validCr ? m : null);
         return body;
+    }
+
+    /** Records what a successful 206 reveals: range support, ETag, total size. */
+    private void learn(HttpResponse<byte[]> resp, Matcher contentRange) {
+        rangesSupported = true;
+        String e = header(resp, "ETag");
+        if (e != null) {
+            etag = e;
+        }
+        if (contentRange != null && !"*".equals(contentRange.group(3))) {
+            size = Long.parseLong(contentRange.group(3));
+        }
+        if (size >= 0) {
+            probed = true;
+        }
     }
 
     private HttpRequest rangeRequest(String range) {
@@ -235,6 +268,13 @@ public final class HttpRangeReader implements ByteSource {
 
     private static final class ShortReadException extends IOException {
         ShortReadException(String message) {
+            super(message);
+        }
+    }
+
+    /** Status/body a compliant server can never send twice: retrying is pointless. */
+    private static final class ProtocolViolationException extends IOException {
+        ProtocolViolationException(String message) {
             super(message);
         }
     }

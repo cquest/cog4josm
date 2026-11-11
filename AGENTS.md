@@ -101,10 +101,20 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
 - **I/O strategy** (`reader/`): `RangePlanner` merges small byte-ranges into
   few larger requests (external IFD tag values fetched in one block per IFD;
   adjacent COG tiles of a window fetched one block per row — they are stored
-  row-major). `MetadataCache` (global LRU, keyed by URL + exact range,
-  validated by size/ETag fingerprint at open) caches **metadata only** —
-  header, IFDs, tile offset arrays — never raw raster: tiles are fetched
-  coalesced and kept only as decoded images (`CogReader` cache).
+  row-major). No `bytes=0-0` probe request: `CogReader.open` starts with one
+  speculative 32 KiB **head read** (`HEAD_READ_BYTES`) whose 206 answer
+  proves range support and reveals size/ETag (a 200 answer is the
+  `RangeNotSupportedException`); `HttpRangeReader` keeps the 1-byte probe
+  only as fallback for `size()` called before any read, and every 206
+  "learns" the same facts (clamped bodies accepted only through a valid
+  Content-Range; protocol violations raise immediately, no retry).
+  `MetadataCache` (global LRU, keyed by URL + block offset + actual byte
+  count, **containment lookup** so the head block serves every smaller
+  metadata read, validated by size/ETag fingerprint at open) caches
+  **metadata only** — header, IFDs, tile offset arrays — never raw raster:
+  tiles are fetched coalesced and kept only as decoded images (`CogReader`
+  cache). Measured on `test_data/cog-paris-3857.tif` over local HTTP: first
+  open went from 14 requests (probe + 13 metadata) to 1 head read.
   Rule: any new read path must choose deliberately between the metadata
   cache (`MetadataCachingSource`) and the direct source; never cache pixels
   **in the reader**. Composed 256 px display tiles are a different thing:
@@ -463,5 +473,12 @@ tile cache — JCS region "cog" injected into `CogTileLoader`, key
 fingerprint(url+size+etag)+"/z/x/y", PNG-encoded `BufferedImageCacheEntry`
 (memory + disk spool, JOSM purge actions apply); error/blank tiles never
 cached. Raw COG bytes remain outside any cache (principle unchanged).
+Phase 2.6 (done): fewer HTTP requests per open — the one-byte `Range:`
+probe is dropped (the first ranged 206 read learns size/ETag/support; a
+200 answer still raises `RangeNotSupportedException` before big buffering),
+and `CogReader.open` seeds the metadata cache with one speculative 32 KiB
+head read that `MetadataCache` containment lookups then serve for every
+metadata range. Measured: first open of `cog-paris-3857.tif` over HTTP
+dropped from 14 requests to 1; reopening stays at 1.
 Phase 3: publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

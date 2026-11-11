@@ -11,6 +11,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -33,6 +35,8 @@ class HttpRangeReaderTest {
     private int port;
     private final AtomicInteger rangeHits = new AtomicInteger();
     private final AtomicInteger fullHits = new AtomicInteger();
+    /** Raw Range headers received, in order. */
+    private final List<String> rangeRequests = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void startServer() throws IOException {
@@ -69,6 +73,7 @@ class HttpRangeReaderTest {
                 return;
             }
             String spec = range.substring("bytes=".length());
+            rangeRequests.add(range);
             String[] parts = spec.split("-");
             int from = Integer.parseInt(parts[0]);
             int to = parts.length > 1 && !parts[1].isEmpty() ? Integer.parseInt(parts[1]) : tiff.length - 1;
@@ -168,7 +173,21 @@ class HttpRangeReaderTest {
         try (HttpRangeReader r = HttpRangeReader.open(url("/image.tif"), null)) {
             assertEquals(cogBytes().length, r.size());
             assertTrue(r.supportsRanges());
-            assertTrue(rangeHits.get() >= 1);
+            assertEquals(List.of("bytes=0-0"), rangeRequests,
+                    "fallback 1-byte probe: only when size() is asked before any read");
+        }
+    }
+
+    @Test
+    void speculativeHeadReadReplacesProbe() throws IOException {
+        // no bytes=0-0 request and no size probe on the CogReader path: the
+        // first request is the clamped 32 KiB head read, and it carries every
+        // metadata byte of this small fixture (containment slicing afterwards)
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            assertEquals(3857, r.info().crsCode);
+            assertEquals(List.of("bytes=0-" + (CogReader.HEAD_READ_BYTES - 1)), rangeRequests,
+                    "one clamped head read, no probe");
+            assertEquals(1, rangeHits.get(), "parsing served from the head block");
         }
     }
 
@@ -178,7 +197,7 @@ class HttpRangeReaderTest {
             BufferedImage img = r.getTile(0, 2, 2);
             assertEquals(16, img.getWidth());
             assertTrue(fullHits.get() == 0, "no full download");
-            assertTrue(rangeHits.get() >= 4, "partial reads only: " + rangeHits.get());
+            assertTrue(rangeHits.get() >= 2, "partial reads only: " + rangeHits.get());
             assertTrue(rangeHits.get() < 40, "avoids chatty requests: " + rangeHits.get());
         }
     }
@@ -190,9 +209,10 @@ class HttpRangeReaderTest {
     }
 
     @Test
-    void probeDoesNotBufferIgnoredRangeBody() {
+    void headReadDoesNotBufferIgnoredRangeBody() {
         // audit POC: a server ignoring Range used to stream its WHOLE body
-        // into memory during the probe; the body must be discarded instead
+        // into memory during the probe (now during the head read); the body
+        // must be discarded instead
         IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/huge200.tif")));
         assertTrue(e instanceof RangeNotSupportedException, e.toString());
     }
@@ -205,8 +225,8 @@ class HttpRangeReaderTest {
     }
 
     @Test
-    void oversizedProbeBodyRejected() {
-        // 4 MB of body for a 1-byte probe: capped, surfaces as IOException
+    void oversizedBodyForRequestedRangeRejected() {
+        // 4 MB of body for a 32 KiB head read: capped, surfaces as IOException
         IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/fat206.tif")));
         assertTrue(e.getMessage().contains("large body"), e.getMessage());
     }
@@ -226,9 +246,9 @@ class HttpRangeReaderTest {
         try (CogReader r = CogReader.open(url("/image.tif"))) {
             r.getTile(0, 2, 2);
             assertTrue(fullHits.get() == 0, "no full download");
-            // probe + header + 2 IFD blocks + merged value blocks + tile:
+            // head read (metadata in one request) + one merged tile block:
             // well under the one-request-per-tag era (~30 requests)
-            assertTrue(rangeHits.get() <= 12, "merged byte-ranges: " + rangeHits.get());
+            assertTrue(rangeHits.get() <= 4, "merged byte-ranges: " + rangeHits.get());
         }
     }
 
@@ -241,7 +261,7 @@ class HttpRangeReaderTest {
         try (CogReader r2 = CogReader.open(url("/image.tif"))) {
             assertEquals(3857, r2.info().crsCode);
             assertEquals(1, rangeHits.get() - afterFirst,
-                    "only the size/ETag probe reaches the network");
+                    "only the head read (size/ETag check) reaches the network");
             // raster content is never served from the metadata cache
             r2.getTile(0, 2, 2);
             assertEquals(afterFirst + 2, rangeHits.get());

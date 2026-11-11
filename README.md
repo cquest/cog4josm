@@ -32,8 +32,13 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   window) are merged into a few `Range:` requests per block, following GDAL's
   overlapped-I/O model — about 2 to 4 requests per display tile instead of
   one per source tile.
+* Speculative head read: opening an HTTP source issues a single
+  `bytes=0-32767` request which proves `Range:` support (no separate probe
+  request), reveals size and ETag, and carries the header, IFDs and GeoKeys
+  of a well-laid-out COG in one round-trip.
 * LRU cache of **metadata only** (header, IFDs, tile offset tables),
-  validated by size/ETag: reopening the same COG costs a single probe
+  validated by size/ETag and looked up by containment (a bigger cached block
+  serves smaller reads): reopening the same COG costs that single head
   request. Raster content is never cached as raw bytes (only as decoded
   images).
 * The composed 256 px display tiles go into **JOSM's own imagery tile
@@ -51,7 +56,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 
 | Feature | Status |
 |---|---|
-| Byte-range reads + `Range:` probe | ✅ |
+| Byte-range reads, one head read at open (no probe) | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Metadata LRU cache (never raw raster) | ✅ |
 | Composed display tiles in JOSM's tile cache (memory + disk) | ✅ |
@@ -131,7 +136,7 @@ the order of a hundred meters, acceptable for a map background.
 src/main/java/org/openstreetmap/josm/plugins/cog/
 ├── CogPlugin, AddCogLayerAction    plugin entry point ("add a COG layer" action)
 ├── reader/                         COG reading, JOSM-free
-│   ├── ByteSource, HttpRangeReader HTTP byte-range fetching (probe, ETag, retries)
+│   ├── ByteSource, HttpRangeReader HTTP byte-range fetching (learned size/ETag, retries)
 │   ├── TiffParser, CogInfo         TIFF/BigTIFF + GeoKeys parser (pyramid, georeferencing)
 │   ├── RangePlanner                small ranges merged into per-block requests
 │   ├── MetadataCache, MetadataCachingSource

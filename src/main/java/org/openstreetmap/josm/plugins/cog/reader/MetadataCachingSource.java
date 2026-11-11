@@ -36,7 +36,9 @@ final class MetadataCachingSource implements ByteSource {
             return hit;
         }
         byte[] data = http.read(offset, length);
-        MetadataCache.global().store(url, offset, length, data);
+        // stored under its actual byte count: a body clamped at the end of
+        // the file must not be recorded as the longer range we asked for
+        MetadataCache.global().store(url, offset, data);
         return data;
     }
 
