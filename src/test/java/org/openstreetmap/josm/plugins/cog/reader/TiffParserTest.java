@@ -49,22 +49,22 @@ class TiffParserTest {
         assertEquals(4, l.tileOffsets.length);
         for (int i = 0; i < l.tileOffsets.length; i++) {
             for (int j = i + 1; j < l.tileOffsets.length; j++) {
-                assertTrue(l.tileOffsets[i] != l.tileOffsets[j], "offsets distincts");
+                assertTrue(l.tileOffsets[i] != l.tileOffsets[j], "distinct offsets");
             }
-            assertTrue(l.tileOffsets[i] + l.tileByteCounts[i] <= tiff.length, "dans le fichier");
+            assertTrue(l.tileOffsets[i] + l.tileByteCounts[i] <= tiff.length, "within the file");
         }
     }
 
     @Test
     void rejectsStrippedTiff() {
-        // TIFF minimal sans tags de tuiles : doit echouer avec un message clair
+        // minimal TIFF without tile tags: must fail with a clear message
         byte[] fake = new byte[64];
         fake[0] = 'I';
         fake[1] = 'I';
         fake[2] = 42;
-        fake[4] = 8; // premier IFD a 8, 0 entrees
+        fake[4] = 8; // first IFD at 8, 0 entries
         IOException e = assertThrows(IOException.class, () -> TiffParser.parse(new InMemoryByteSource(fake)));
-        assertTrue(e.getMessage().contains("tuile"));
+        assertTrue(e.getMessage().contains("tiled"));
     }
 
     @Test
@@ -94,7 +94,7 @@ class TiffParserTest {
         assertEquals(6600000.0, ci.customCrs.dbl(CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING), 1e-12);
         assertEquals(6378137.0, ci.customCrs.dbl(CustomCrs.KEY_GEOG_SEMI_MAJOR), 1e-9);
         org.junit.jupiter.api.Assertions.assertNotNull(ci.customCrs.citation);
-        // le parseur ne doit pas confondre clef inline et reference DOUBLE
+        // the parser must not confuse an inline key with a DOUBLE reference
         org.junit.jupiter.api.Assertions.assertNull(ci.customCrs.key(CustomCrs.KEY_PROJ_STD_PARALLEL1));
         org.junit.jupiter.api.Assertions.assertTrue(ci.crsDescription().contains("custom"));
     }
@@ -111,7 +111,7 @@ class TiffParserTest {
                 2057, 34736, 1, 0,
                 2059, 34736, 1, 1,
                 2061, 34736, 1, 2,
-                2600, 34737, 5, 0, // clef ASCII (nom de GCS) : ignoree mais parseable
+                2600, 34737, 5, 0, // ASCII key (GCS name): ignored but parseable
         };
         byte[] tiff = TestTiffWriter.write(List.of(
                 new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
@@ -125,9 +125,9 @@ class TiffParserTest {
 
     @Test
     void readsHybridRegisteredCodeWithGeoKeysParams() throws IOException {
-        // cas PIX4Dmatic : code EPSG enregistre (3943) MAIS methode declaree
-        // "user-defined" (3074=32767) avec parametres complets en DOUBLE ->
-        // customCrs doit etre conserve (repli Crs.resolve si code inconnu)
+        // PIX4Dmatic case: registered EPSG code (3943) BUT method declared as
+        // "user-defined" (3074=32767) with full DOUBLE parameters ->
+        // customCrs must be kept (Crs.resolve falls back to it if the code is unknown)
         double[] d = new double[9];
         int[] keys = TestTiffWriter.customKeysLcc(d, 3943, 4171);
         byte[] tiff = TestTiffWriter.write(List.of(
@@ -143,10 +143,10 @@ class TiffParserTest {
 
     @Test
     void sortsHugePyramidWithoutIntOverflow() {
-        // COG PIX4Dmatic 131072x98304 : aire = 3x2^32 = 0 en int, et l'overview
-        // 65536x49152 = 3x2^30 devient negative : le tri placait une overview
-        // (NewSubfileType=1) en premier -> fausse erreur « IFD pleine resolution
-        // absent ». L'aire doit etre calculee en long.
+        // PIX4Dmatic COG 131072x98304: area = 3x2^32 = 0 as int, and the overview
+        // 65536x49152 = 3x2^30 goes negative: the sort used to place an overview
+        // (NewSubfileType=1) first -> spurious "missing full-resolution IFD"
+        // error. The area must be computed as long.
         java.util.List<CogInfo.Level> levels = new java.util.ArrayList<>();
         levels.add(new CogInfo.Level(2, 32768, 24576, 128, 128, 7, 6, 1,
                 3, new int[]{8, 8, 8}, new int[0], 1, 1, false, new long[0], new long[0]));

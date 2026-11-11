@@ -14,18 +14,18 @@ import org.openstreetmap.josm.plugins.cog.crs.Crs;
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
 
 /**
- * Test de bout en bout de la phase 2.1 : COG declares en systemes GeoTIFF
- * "user-defined" (codes 32767, GeoKeys 34735/34736 comme les ecrit GDAL 3),
- * reprojetes via le mapping declaratif Crs.fromCustom.
+ * End-to-end test of phase 2.1: COGs declared as "user-defined" GeoTIFF
+ * systems (codes 32767, GeoKeys 34735/34736 as written by GDAL 3),
+ * reprojected via the declarative mapping Crs.fromCustom.
  *
- * Ancres verifiees contre GDAL (voir CustomCrsTest) :
- *   LCC custom  (700000, 6600000) == (3.0E, 46.5N)  (parametres de Lambert-93)
- *   TM custom   ancre GDAL (610974.823, 2216689.855) == (2.5E, 49.0N), Clarke 1880 (IGN)
- * Le controle de placement des pixels suit la methode de CogWarpTest.
+ * Anchors verified against GDAL (see CustomCrsTest):
+ *   LCC custom  (700000, 6600000) == (3.0E, 46.5N)  (Lambert-93 parameters)
+ *   TM custom   GDAL anchor (610974.823, 2216689.855) == (2.5E, 49.0N), Clarke 1880 (IGN)
+ * The pixel placement check follows the method used in CogWarpTest.
  */
 class CogCustomWarpTest {
 
-    /** COG 64x48 px, pixel de 100 unites-modele, 2 niveaux, GeoKeys custom LCC. */
+    /** 64x48 px COG, 100 model-unit pixels, 2 levels, custom LCC GeoKeys. */
     private static CogReader openLccCog() throws IOException {
         double[] d = new double[9];
         int[] keys = TestTiffWriter.customKeysLcc(d);
@@ -36,9 +36,9 @@ class CogCustomWarpTest {
     }
 
     /**
-     * COG TM custom Clarke 1880 (IGN) : lat0 46.0, lon0 2.5, k0 1 (absent),
-     * FE 600000, FN 2200000. Ancre GDAL (verifiee avec osgeo.osr) :
-     * (2.5E, 49.0N) -> (600000.000, 2533540.715), placeee au rang 24 / 48 du COG.
+     * Custom TM COG Clarke 1880 (IGN): lat0 46.0, lon0 2.5, k0 1 (absent),
+     * FE 600000, FN 2200000. GDAL anchor (verified with osgeo.osr):
+     * (2.5E, 49.0N) -> (600000.000, 2533540.715), placed at row 24 / 48 of the COG.
      */
     private static CogReader openTmCog() throws IOException {
         double[] d = {46.0, 2.5, 600000.0, 2200000.0, 6378249.2, 293.4660212936269};
@@ -55,8 +55,8 @@ class CogCustomWarpTest {
                 3076, 0, 1, 9001,
                 3080, 34736, 1, 1, // lon0
                 3081, 34736, 1, 0, // lat0
-                3082, 34736, 1, 2, // fausse est
-                3083, 34736, 1, 3, // fausse nord
+                3082, 34736, 1, 2, // false easting
+                3083, 34736, 1, 3, // false northing
         };
         return CogReader.open(new InMemoryByteSource(TestTiffWriter.write(List.of(
                 new TestTiffWriter.LevelSpec(64, 48, 8, 1, 8, false),
@@ -64,7 +64,7 @@ class CogCustomWarpTest {
                 32767, keys, d, 100.0, 600000.0, TM_ANCHOR_Y + 2400.0)));
     }
 
-    /** Ordonnee (unites-modele) de l'ancre GDAL (2.5E, 49.0N). */
+    /** Y ordinate (model units) of the GDAL anchor (2.5E, 49.0N). */
     private static final double TM_ANCHOR_Y = 2533540.7151;
 
     private static Bounds bbox3857(double minLon, double minLat, double maxLon, double maxLat, double margin) {
@@ -75,7 +75,7 @@ class CogCustomWarpTest {
                 MercatorTiles.lonToX(maxLon + dx), MercatorTiles.latToY(maxLat + dy));
     }
 
-    /** Valeur bilineaire du motif pix() aux coordonnees sources (col, row). */
+    /** Bilinear value of the pix() pattern at source coordinates (col, row). */
     private static double[] motifBilinear(double col, double row) {
         int c0 = (int) Math.floor(col);
         int r0 = (int) Math.floor(row);
@@ -92,7 +92,7 @@ class CogCustomWarpTest {
         return out;
     }
 
-    /** Controle de placement identique a CogWarpTest (tolerance 0.15 px source). */
+    /** Placement check identical to CogWarpTest (tolerance 0.15 source px). */
     private static void checkPlacement(BufferedImage img, Bounds bbox, Projection proj,
                                        double originX, double originY, double res,
                                        double colMargin, double rowMargin, int w, int h) {
@@ -111,7 +111,7 @@ class CogCustomWarpTest {
                     continue;
                 }
                 int argb = img.getRGB(i, j);
-                assertTrue(((argb >>> 24) & 0xFF) > 250, "pixel transparent en (" + i + "," + j + ")");
+                assertTrue(((argb >>> 24) & 0xFF) > 250, "transparent pixel at (" + i + "," + j + ")");
                 for (int ch = 0; ch < 3; ch++) {
                     double min = Double.MAX_VALUE;
                     double max = -Double.MAX_VALUE;
@@ -124,13 +124,13 @@ class CogCustomWarpTest {
                     }
                     int got = (argb >> (16 - 8 * ch)) & 0xFF;
                     assertTrue(got >= min - 2 && got <= max + 2,
-                            "canal " + ch + " pixel (" + i + "," + j + ") source=(" + col + "," + row
-                                    + ") valeur " + got + " hors [" + min + "," + max + "]");
+                            "channel " + ch + " pixel (" + i + "," + j + ") source=(" + col + "," + row
+                                    + ") value " + got + " outside [" + min + "," + max + "]");
                 }
                 checked++;
             }
         }
-        assertTrue(checked >= 20, "trop peu de points verifies : " + checked);
+        assertTrue(checked >= 20, "too few points checked: " + checked);
     }
 
     @Test
@@ -141,7 +141,7 @@ class CogCustomWarpTest {
             assertNotNull(info.customCrs);
             Projection custom = Crs.fromCustom(info.customCrs);
             Projection l93 = Crs.forEpsg(2154);
-            // ancre GDAL : NW = (3.0E, 46.5N) exactement
+            // GDAL anchor: NW = (3.0E, 46.5N) exactly
             double[] nw = custom.unproject(700000.0, 6600000.0);
             assertEquals(46.5, nw[0], 1e-6);
             assertEquals(3.0, nw[1], 1e-6);
@@ -152,7 +152,7 @@ class CogCustomWarpTest {
             assertNotNull(img);
             checkPlacement(img, bbox, custom, 700000.0, 6600000.0, 100.0, 6, 6, 64, 48);
 
-            // deplace avec la projection enregistree 2154 : les rendus doivent coincider
+            // warped with the registered 2154 projection: the renderings must match
             BufferedImage ref = CogComposer.composeWarp(r, l93, bbox, 256);
             assertNotNull(ref);
             int diff = 0;
@@ -163,7 +163,7 @@ class CogCustomWarpTest {
                     }
                 }
             }
-            assertTrue(diff <= 1, "rendus custom vs EPSG:2154 divergents : " + diff + " px");
+            assertTrue(diff <= 1, "custom vs EPSG:2154 renderings diverge: " + diff + " px");
         }
     }
 
@@ -171,10 +171,10 @@ class CogCustomWarpTest {
     void customTransverseMercatorPlacement() throws IOException {
         try (CogReader r = openTmCog()) {
             Projection tm = Crs.fromCustom(r.info().customCrs);
-            // origine modeles = coin NW du COG, 24 px au-dessus de l'ancre GDAL
+            // model origin = COG NW corner, 24 px above the GDAL anchor
             double originX = 600000.0;
             double originY = TM_ANCHOR_Y + 2400.0;
-            // ancre GDAL : (2.5E, 49.0N) -> (600000, 2533540.715) = rang 24 du COG
+            // GDAL anchor: (2.5E, 49.0N) -> (600000, 2533540.715) = row 24 of the COG
             double[] m = tm.project(49.0, 2.5);
             assertEquals(originX, m[0], 1e-3);
             assertEquals(TM_ANCHOR_Y, m[1], 1e-3);

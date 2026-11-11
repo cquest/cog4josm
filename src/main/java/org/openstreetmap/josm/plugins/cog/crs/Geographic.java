@@ -1,10 +1,10 @@
 package org.openstreetmap.josm.plugins.cog.crs;
 
 /**
- * Coordonnees geographiques (EPSG:4326 ou systeme custom declare en GeoKeys) :
- * x = longitude, y = latitude, en degres. Les unites du modele sont donc les
- * degres. Un meridien principal non nul (GeoKey GeogPrimeMeridian 2061) est
- * pris en compte : x = longitude - meridien (longitude geodetique).
+ * Geographic coordinates (EPSG:4326 or a custom system declared through
+ * GeoKeys): x = longitude, y = latitude, in degrees. The model units are
+ * therefore degrees. A non-zero principal meridian (GeoKey GeogPrimeMeridian
+ * 2061) is taken into account: x = longitude - meridian (geodetic longitude).
  */
 public final class Geographic implements Projection {
 
@@ -35,7 +35,7 @@ public final class Geographic implements Projection {
         return epsg;
     }
 
-    /** Vrai si le meridien principal est Greenwich (voie lineaire possible). */
+    /** True when the principal meridian is Greenwich (linear path possible). */
     public boolean isPrimeMeridianZero() {
         return primeMeridian == 0.0;
     }

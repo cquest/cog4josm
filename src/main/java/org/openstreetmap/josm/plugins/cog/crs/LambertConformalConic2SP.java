@@ -1,9 +1,9 @@
 package org.openstreetmap.josm.plugins.cog.crs;
 
 /**
- * Projection conique conforme de Lambert a deux paralleles d'entree/sortie
- * (EPSG:2154 Lambert-93...). Formules ellipsoidales de Snyder (USGS PP 1312).
- * L'iteration d'inversion de phi converge en 3-4 tours a la precision du mm.
+ * Lambert conformal conic projection with two standard parallels
+ * (EPSG:2154 Lambert-93...). Snyder ellipsoidal formulas (USGS PP 1312).
+ * The iteration inverting phi converges in 3-4 rounds to millimetre accuracy.
  */
 public final class LambertConformalConic2SP implements Projection {
 
@@ -18,13 +18,13 @@ public final class LambertConformalConic2SP implements Projection {
     }
 
     /**
-     * @param k0AtLat0 facteur d'echelle a lat0 ; null = 1.0, convention GeoTIFF/PROJ
-     * ou le facteur n'est porte que s'il est explicite (GeoKey 3092). Comme PROJ,
-     * k0 s'applique a tout le rayon rho : le point (lat0, lon0) tombe exactement
-     * sur (fe, fn) et la scale locale a lat0 vaut k0 (verifie contre GDAL).
-     * Les deux paralleles d'entree/sortie peuvent etre egaux (Lambert 1SP).
-     * Noms de parametres explicites ("Deg") : eviter toute confusion avec les
-     * champs en radians (piege de portee dans les constructeurs, cf. AGENTS.md).
+     * @param k0AtLat0 scale factor at lat0; null = 1.0, the GeoTIFF/PROJ convention
+     * where the factor is only carried when explicit (GeoKey 3092). As in PROJ,
+     * k0 applies to the whole rho radius: the point (lat0, lon0) lands exactly
+     * on (fe, fn) and the local scale at lat0 is k0 (verified against GDAL).
+     * The two standard parallels may be equal (Lambert 1SP).
+     * Explicit parameter names ("Deg"): avoid any confusion with the radian
+     * fields (constructor scope pitfall, see AGENTS.md).
      */
     public LambertConformalConic2SP(int epsg, Ellipsoid ell, double stdPar1Deg, double stdPar2Deg,
                                     double lat0Deg, double lon0Deg, double fe, double fn,
@@ -80,7 +80,7 @@ public final class LambertConformalConic2SP implements Projection {
         double rho = Math.copySign(Math.hypot(dx, dy), n);
         double theta = Math.atan2(Math.copySign(1, n) * dx, dy);
         double tp = Math.pow(rho / (k0 * ell.semiMajorAxis * bigF), 1 / n);
-        // inversion de t(phi) : point fixe de Snyder, convergence rapide
+        // inversion of t(phi): Snyder fixed-point iteration, fast convergence
         double phi = Math.PI / 2 - 2 * Math.atan(tp);
         double e = ell.e;
         for (int i = 0; i < 12; i++) {

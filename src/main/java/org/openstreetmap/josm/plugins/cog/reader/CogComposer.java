@@ -9,16 +9,16 @@ import java.awt.image.BufferedImage;
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
 
 /**
- * Recompose une tuile d'affichage (cible {@code targetSize} x {@code targetSize})
- * en choisissant le niveau de pyramide le plus adequat, en telechargeant via la
- * {@link CogReader} uniquement les tuiles sources intersectant la boite.
+ * Recomposes a display tile (target {@code targetSize} x {@code targetSize}) by
+ * picking the most suitable pyramid level and fetching, through {@link CogReader},
+ * only the source tiles intersecting the box.
  */
 public final class CogComposer {
 
-    /** Limite de garde : evite de rassembler une fenetre source demesuree. */
+    /** Guard limit: avoids gathering an oversized source window. */
     private static final int MAX_WINDOW_PX = 4096;
 
-    /** Pas de la grille de controle du mode reprojection (G x G points exacts). */
+    /** Step of the control grid of reprojection mode (G x G exact points). */
     private static final int WARP_GRID = 9;
 
     private CogComposer() {
@@ -66,16 +66,16 @@ public final class CogComposer {
     }
 
     /**
-     * Mode reprojection : la boite {@code bbox} est exprimee dans la grille
-     * web-mercator d'affichage (EPSG:3857) ; le COG est dans un autre systeme
-     * ({@code proj}). Une grille de controle {@value WARP_GRID} x {@value WARP_GRID}
-     * est projetee exactement (3857 -> lat/lon -> coordonnées modeles -> pixels
-     * sources) ; chaque pixel de sortie recoit des coordonnees sources interpolatees
-     * bilineairement (approximation lineaire locale, reguliere a l'echelle d'une
-     * tuile) puis est echantillonne en bilineaire ARGB dans la fenetre source.
+     * Reprojection mode: the {@code bbox} box is expressed in the display
+     * web-mercator grid (EPSG:3857); the COG uses another CRS ({@code proj}). A
+     * control grid of {@value WARP_GRID} x {@value WARP_GRID} points is projected
+     * exactly (3857 -> lat/lon -> model coordinates -> source pixels); each
+     * output pixel gets source coordinates interpolated bilinearly (local linear
+     * approximation, regular at the scale of one tile), then is sampled with
+     * bilinear ARGB inside the source window.
      *
-     * Le niveau de pyramide est choisi pour que la fenetre source projetee ait la
-     * taille la plus proche de {@code targetSize} (rapport logarithmique).
+     * The pyramid level is chosen so that the projected source window has the
+     * size closest to {@code targetSize} (logarithmic ratio).
      */
     public static BufferedImage composeWarp(CogReader reader, Projection proj, Bounds bbox, int targetSize)
             throws IOException {
@@ -89,8 +89,8 @@ public final class CogComposer {
         double gMinX = Double.MAX_VALUE, gMaxX = -Double.MAX_VALUE;
         double gMinY = Double.MAX_VALUE, gMaxY = -Double.MAX_VALUE;
         for (int v = 0; v < g; v++) {
-            // ligne 0 de la sortie = bord Nord de la boite (maxY) : le maillage
-            // suit la meme orientation que l'image Java (ligne 0 en haut)
+            // output row 0 = north edge of the box (maxY): the grid follows the
+            // same orientation as a Java image (row 0 at the top)
             double lat = MercatorTiles.yToLat(bbox.maxY() - (v / (double) (g - 1)) * bbox.height());
             for (int u = 0; u < g; u++) {
                 double lon = MercatorTiles.xToLon(bbox.minX() + (u / (double) (g - 1)) * bbox.width());
@@ -113,8 +113,8 @@ public final class CogComposer {
         for (int li = 0; li < ci.levelCount(); li++) {
             double[] span = windowSpan(ci, li, gMinX, gMaxX, gMinY, gMaxY);
             double err = Math.abs(Math.log(Math.max(span[0], span[1]) / targetSize));
-            // fenetre raisonnable exigee ; a defaut, le niveau le plus grossier
-            // (les COG ont une pyramide complete, le dernier niveau est minuscule)
+            // a reasonable window is required; otherwise the coarsest level
+            // (COGs have a full pyramid, the last level is tiny)
             if (span[0] > MAX_WINDOW_PX || span[1] > MAX_WINDOW_PX) {
                 if (li == ci.levelCount() - 1) {
                     best = li;
@@ -172,7 +172,7 @@ public final class CogComposer {
         return out;
     }
 
-    /** Etendue (largeur, hauteur en pixels) de la fenetre source au niveau donne. */
+    /** Extent (width, height in pixels) of the source window at the given level. */
     private static double[] windowSpan(CogInfo ci, int levelIndex,
                                        double gMinX, double gMaxX, double gMinY, double gMaxY) {
         CogInfo.Level level = ci.level(levelIndex);
@@ -181,7 +181,7 @@ public final class CogComposer {
         return new double[]{(gMaxX - gMinX) / resX, (gMaxY - gMinY) / resY};
     }
 
-    /** Assembles les tuiles TIFF couvrant la fenetre [px0,py0] + windowW/H. */
+    /** Assembles the TIFF tiles covering the window [px0,py0] + windowW/H. */
     private static BufferedImage buildWindow(CogReader reader, int levelIndex,
                                              int px0, int py0, int windowW, int windowH) throws IOException {
         CogInfo ci = reader.info();
@@ -215,9 +215,9 @@ public final class CogComposer {
     }
 
     /**
-     * Echantillonnage bilineaire ARGB conscient de l'alpha : les poids bilineaires
-     * sont pondere par l'alpha des pixels voisins (le transparent ne "noircit" pas
-     * le melange). Coordonnee continue : le centre du pixel k vaut k + 0.5.
+     * Alpha-aware bilinear ARGB sampling: the bilinear weights are weighted by
+     * the alpha of the neighbouring pixels (transparent pixels do not "darken"
+     * the blend). Continuous coordinate: the centre of pixel k is at k + 0.5.
      */
     private static int sampleBilinear(BufferedImage img, double wx, double wy) {
         int w = img.getWidth();

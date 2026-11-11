@@ -1,40 +1,39 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 /**
- * Systeme de reference "user-defined" d'un GeoTIFF (codes GeoKeys 32767) :
- * valeur brute des GeoKeys et des parametres DOUBLE de la balise
- * GeoDoubleParams (34736). Aucune interpretation cartographique ici :
- * le paquetage {@code crs} convertit ces clefs en projection via
- * {@code Crs.fromCustom} (mapping declaratif, aucune formule ajoutee).
+ * "user-defined" coordinate reference system of a GeoTIFF (GeoKeys codes
+ * 32767): raw values of the GeoKeys and of the DOUBLE parameters of the
+ * GeoDoubleParams tag (34736). No cartographic interpretation here: the
+ * {@code crs} package turns these keys into a projection through
+ * {@code Crs.fromCustom} (declarative mapping, no added formula).
  *
- * Les valeurs attendues suivent GeoTIFF 1.1 / libgeotiff, telles que les
- * ecrit GDAL >= 3 (verifie avec exiftool et lecture brute des tags sur des
- * COG de reference) :
- * - projection custom : 3074 = 32767 et 3075 = code de methode de projection ;
- * - projection enregistree : 3074 = type de transformation, 3075 = code methode ;
- * - les Grandeurs lineaires sont dans l'unite du GeoKey 3076, les angles en degres.
+ * The expected values follow GeoTIFF 1.1 / libgeotiff, as written by
+ * GDAL >= 3 (checked with exiftool and raw tag reads on reference COGs):
+ * - custom projection: 3074 = 32767 and 3075 = projection method code;
+ * - registered projection: 3074 = transformation type, 3075 = method code;
+ * - linear quantities use the unit of GeoKey 3076, angles are in degrees.
  */
 public final class CustomCrs {
 
-    /** Une entree du repertoire GeoKeys (34735) : id, locator, nombre, valeur. */
+    /** An entry of the GeoKeys directory (34735): id, locator, count, value. */
     public record Key(int id, int locator, int count, int value) {
 
-        /** true si la clef est presente avec une valeur SHORT/LONG inline. */
+        /** true if the key is present with an inline SHORT/LONG value. */
         public boolean inline() {
             return locator == 0;
         }
 
-        /** true si la valeur est un index dans le tableau DOUBLE (34736). */
+        /** true if the value is an index into the DOUBLE array (34736). */
         public boolean doubleRef() {
             return locator == TiffParser.TAG_GEO_DOUBLE_PARAMS;
         }
     }
 
-    // balises TIFF
+    // TIFF tags
     public static final int GDT_DOUBLE = TiffParser.TAG_GEO_DOUBLE_PARAMS;   // 34736
     public static final int GDT_ASCII = TiffParser.TAG_GEO_ASCII_PARAMS;     // 34737
 
-    // GeoKeys modele / geodetiques
+    // model / geographic GeoKeys
     public static final int KEY_MODEL_TYPE = 1024;
     public static final int KEY_GEOG_CODE = 2048;
     public static final int KEY_GEOG_AZIMUTH_UNITS = 2054;
@@ -44,7 +43,7 @@ public final class CustomCrs {
     public static final int KEY_GEOG_INV_FLATTENING = 2059;
     public static final int KEY_GEOG_PRIME_MERIDIAN = 2061;
 
-    // GeoKeys projetes
+    // projected GeoKeys
     public static final int KEY_PROJ_CODE = 3072;
     public static final int KEY_PROJ_COORD_TRANS = 3074;
     public static final int KEY_PROJ_METHOD_CODE = 3075;
@@ -61,40 +60,40 @@ public final class CustomCrs {
     public static final int KEY_PROJ_FALSE_ORIGIN_NORTHING = 3087;
     public static final int KEY_PROJ_SCALE_FACTOR = 3092;
 
-    /** Modele de type geographique (GeoKey 1024 = 2). */
+    /** Geographic model type (GeoKey 1024 = 2). */
     public static final int MODEL_TYPE_GEOGRAPHIC = 2;
-    /** Unite angulaire "degree angular" (GeoKey 2054). */
+    /** "degree angular" angular unit (GeoKey 2054). */
     public static final int UNIT_DEGREE = 9102;
-    /** Valeur GeoTIFF "User-Defined" (les autres clefs definissent le systeme). */
+    /** GeoTIFF "User-Defined" value (the other keys define the CRS). */
     public static final int USER_DEFINED = 32767;
 
-    // Types de transformation de coordonnees / codes de methode de projection.
-    // GeoKey 3074 (table libgeotiff) et 3075 (codes ecrits par GDAL quand
-    // 3074=32767) partagent les valeurs 1 et 8 ; seuls 9/14 different.
+    // Coordinate transformation types / projection method codes.
+    // GeoKey 3074 (libgeotiff table) and 3075 (codes written by GDAL when
+    // 3074=32767) share the values 1 and 8; only 9/14 differ.
     public static final int CT_TRANSVERSE_MERCATOR = 1;
     public static final int CT_LAMBERT_CONFORMAL_2SP = 8;
-    /** GeoKey 3074=9 : "Mercator_Oblique" = conique conforme Lambert 1SP. */
+    /** GeoKey 3074=9: "Mercator_Oblique" = Lambert conformal conic 1SP. */
     public static final int CT_LAMBERT_CONFORMAL_1SP = 9;
-    /** GeoKey 3075=14 : Lambert_Conformal_Conic_1SP. */
+    /** GeoKey 3075=14: Lambert_Conformal_Conic_1SP. */
     public static final int M_LAMBERT_CONFORMAL_1SP = 14;
 
-    /** Unites lineaires GeoTIFF -> metres (0 = code non supporte). */
+    /** GeoTIFF linear units -> metres (0 = unsupported code). */
     private static final double[] LINEAR_TO_METRE = new double[9110];
     static {
         LINEAR_TO_METRE[9001] = 1.0;                        // metre
-        LINEAR_TO_METRE[9002] = 0.3048;                     // pied international
-        LINEAR_TO_METRE[9003] = 1200.0 / 3937.0;            // pied US survey
-        LINEAR_TO_METRE[9006] = 1200.0 / 3937.0 * 66.0;     // chaine (Gunter, US survey)
+        LINEAR_TO_METRE[9002] = 0.3048;                     // international foot
+        LINEAR_TO_METRE[9003] = 1200.0 / 3937.0;            // US survey foot
+        LINEAR_TO_METRE[9006] = 1200.0 / 3937.0 * 66.0;     // chain (Gunter, US survey)
         LINEAR_TO_METRE[9008] = 1000.0;                     // kilometre
         LINEAR_TO_METRE[9061] = 1000.0;                     // kilometre
-        LINEAR_TO_METRE[9096] = 1200.0 / 3937.0;            // pied US survey
-        LINEAR_TO_METRE[9109] = 1852.0;                     // mille marin international
+        LINEAR_TO_METRE[9096] = 1200.0 / 3937.0;            // US survey foot
+        LINEAR_TO_METRE[9109] = 1852.0;                     // international nautical mile
     }
 
     public final Key[] keys;
-    /** Tableau DOUBLE de la balise 34736 (peut etre vide). */
+    /** DOUBLE array of tag 34736 (may be empty). */
     public final double[] doubleParams;
-    /** Citation ASCII de la balise 34737 (peut etre null). */
+    /** ASCII citation of tag 34737 (may be null). */
     public final String citation;
 
     public CustomCrs(Key[] keys, double[] doubleParams, String citation) {
@@ -103,13 +102,13 @@ public final class CustomCrs {
         this.citation = citation;
     }
 
-    /** Clef inline (locator 0) du code donne, null si absente. */
+    /** Inline key (locator 0) with the given id, null when missing. */
     public Integer key(int id) {
         Key k = find(id);
         return k != null && k.inline() ? k.value() : null;
     }
 
-    /** Parametre DOUBLE reference par la clef (locator 34736), null si absent. */
+    /** DOUBLE parameter referenced by the key (locator 34736), null when missing. */
     public Double dbl(int id) {
         Key k = find(id);
         if (k != null && k.doubleRef() && k.value() >= 0 && k.value() < doubleParams.length) {
@@ -127,13 +126,13 @@ public final class CustomCrs {
         return null;
     }
 
-    /** Emplacement de la citation 34737 portee par une clef ASCII (locator 34737). */
+    /** Position of the 34737 citation carried by an ASCII key (locator 34737). */
     public boolean hasAscii(int id) {
         Key k = find(id);
         return k != null && k.locator() == GDT_ASCII;
     }
 
-    /** Facteur de conversion des unites lineaires declarees (3076) vers les metres, null si code inconnu. */
+    /** Conversion factor from the declared linear units (3076) to metres, null for an unknown code. */
     public static Double linearToMetre(int code) {
         double f = code >= 0 && code < LINEAR_TO_METRE.length ? LINEAR_TO_METRE[code] : 0;
         return f == 0 ? null : f;

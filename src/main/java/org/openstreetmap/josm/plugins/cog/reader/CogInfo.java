@@ -4,38 +4,38 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Description d'un COG : pyramide de niveaux tuiles + georeferencement affine
- * simple (ModelTiepoint + ModelPixelScale, image "north-up").
- * Les niveaux sont tries du plus fin (index 0) au plus grossier.
+ * Description of a COG: pyramid of tiled levels + simple affine
+ * georeferencing (ModelTiepoint + ModelPixelScale, "north-up" image).
+ * Levels are sorted from the finest (index 0) to the coarsest.
  */
 public final class CogInfo {
 
-    /** Un niveau de la pyramide (IFD tuile). */
+    /** A level of the pyramid (tiled IFD). */
     public static final class Level {
         public final int index;
         public final int width;
         public final int height;
         public final int tileWidth;
         public final int tileHeight;
-        /** TIFF Compression tag : 1 none, 5 LZW, 6 JPEG, 8/32946 deflate, 32773 packbits. */
+        /** TIFF Compression tag: 1 none, 5 LZW, 6 JPEG, 8/32946 deflate, 32773 packbits. */
         public final int compression;
-        /** TIFF PhotometricInterpretation : 0 whiteIsZero, 1 blackIsZero, 2 RGB, 6 YCbCr. */
+        /** TIFF PhotometricInterpretation: 0 whiteIsZero, 1 blackIsZero, 2 RGB, 6 YCbCr. */
         public final int photometric;
         public final int predictor;
         public final int samplesPerPixel;
         public final int[] bitsPerSample;
         public final int[] extraSamples;
         public final int sampleFormat;
-        /** NewSubfileType : bit 0 = reduced image (overview). */
+        /** NewSubfileType: bit 0 = reduced image (overview). */
         public final int flags;
-        /** Boutisme du fichier TIFF (MM = true, II = false) : vaut pour les echantillons 16 bits. */
+        /** Endianness of the TIFF file (MM = true, II = false): applies to 16-bit samples. */
         public final boolean bigEndian;
         public final long[] tileOffsets;
         public final long[] tileByteCounts;
         /**
-         * Tables JPEG externes (balise TIFF JPEGTables 347), null si absentes.
-         * GDAL y stocke les tables de quantification quand les tuiles JPEG
-         * compressees ne les embarquent pas.
+         * External JPEG tables (TIFF JPEGTables tag 347), null when missing.
+         * GDAL stores the quantization tables there when the compressed JPEG
+         * tiles do not embed them.
          */
         public final byte[] jpegTables;
 
@@ -100,18 +100,18 @@ public final class CogInfo {
     }
 
     public final List<Level> levels;
-    /** Code EPSG (0 = inconnu/user-defined ; voir alors {@link #customCrs}). */
+    /** EPSG code (0 = unknown/user-defined; in that case see {@link #customCrs}). */
     public final int crsCode;
     /**
-     * Systemes de reference "user-defined" (GeoKeys 32767) lorsque le code
-     * EPSG est absent, null sinon. null egalement si le fichier ne declare
-     * aucun systeme exploitable.
+     * "user-defined" coordinate reference system (GeoKeys 32767) when the EPSG
+     * code is missing, null otherwise. Also null when the file declares no
+     * usable CRS.
      */
     public final CustomCrs customCrs;
-    /** Coordonnees modeles du coin superieur-gauche (coin Nord-Ouest). */
+    /** Model coordinates of the upper-left (north-west) corner. */
     public final double originX;
     public final double originY;
-    /** Taille d'un pixel au niveau 0, en unites demodele (metres ou degres), toujours positif. */
+    /** Size of a pixel at level 0, in model units (metres or degrees), always positive. */
     public final double scaleX;
     public final double scaleY;
     public final String noData;
@@ -141,13 +141,13 @@ public final class CogInfo {
         return levels.size();
     }
 
-    /** Taille de pixel (unites de modele / pixel) d'un niveau donne. */
+    /** Pixel size (model units / pixel) of a given level. */
     public double resolution(int levelIndex) {
         Level l = levels.get(levelIndex);
         return scaleX * levels.get(0).width / (double) l.width;
     }
 
-    /** Index du niveau dont la resolution est la plus proche de {@code wantedResolution}. */
+    /** Index of the level whose resolution is closest to {@code wantedResolution}. */
     public int bestLevelFor(double wantedResolution) {
         int best = 0;
         double bestDiff = Double.MAX_VALUE;
@@ -162,20 +162,20 @@ public final class CogInfo {
         return best;
     }
 
-    /** Description lisible du systeme de reference (pour messages et journaux). */
+    /** Human-readable description of the coordinate reference system (for messages and logs). */
     public String crsDescription() {
         String customPart = null;
         if (customCrs != null) {
             Integer ct = customCrs.key(CustomCrs.KEY_PROJ_COORD_TRANS);
             Integer mc = customCrs.key(CustomCrs.KEY_PROJ_METHOD_CODE);
-            customPart = "systeme custom (3074=" + ct + ", 3075=" + mc + ")";
+            customPart = "custom CRS (3074=" + ct + ", 3075=" + mc + ")";
         }
         if (crsCode != 0 && crsCode != CustomCrs.USER_DEFINED) {
-            // code enregistre ; le fichier peut aussi porter ses parametres
-            // GeoKeys (hybride, cf. Crs.resolve) : les deux sont affiches
+            // registered code; the file may also carry its own GeoKeys
+            // parameters (hybrid, see Crs.resolve): both are displayed
             return customPart != null ? "EPSG:" + crsCode + " + " + customPart : "EPSG:" + crsCode;
         }
-        return customPart != null ? customPart : "systeme inconnu";
+        return customPart != null ? customPart : "unknown CRS";
     }
 
     public double extentMinX() {
@@ -186,12 +186,12 @@ public final class CogInfo {
         return originX + levels.get(0).width * scaleX;
     }
 
-    /** Sud (bord bas). */
+    /** South (bottom edge). */
     public double extentMinY() {
         return originY - levels.get(0).height * scaleY;
     }
 
-    /** Nord (bord haut). */
+    /** North (top edge). */
     public double extentMaxY() {
         return originY;
     }
@@ -199,12 +199,12 @@ public final class CogInfo {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format(Locale.ROOT, "COG : %d IFD(s), %s, origine=(%.6f, %.6f), pixel=(%.9f, %.9f)%n",
+        sb.append(String.format(Locale.ROOT, "COG: %d IFD(s), %s, origin=(%.6f, %.6f), pixel=(%.9f, %.9f)%n",
                 levels.size(), crsDescription(), originX, originY, scaleX, scaleY));
-        sb.append(String.format(Locale.ROOT, "emprise : [%.6f, %.6f, %.6f, %.6f]%n",
+        sb.append(String.format(Locale.ROOT, "extent: [%.6f, %.6f, %.6f, %.6f]%n",
                 extentMinX(), extentMinY(), extentMaxX(), extentMaxY()));
         for (Level l : levels) {
-            sb.append(String.format(Locale.ROOT, "  niveau %d : %dx%d tuiles %dx%d (%dx%d tuiles), compression=%d photo=%d bps=%s samples=%d extra=%s%n",
+            sb.append(String.format(Locale.ROOT, "  level %d: %dx%d tiles %dx%d (%dx%d tiles), compression=%d photo=%d bps=%s samples=%d extra=%s%n",
                     l.index, l.width, l.height, l.tileWidth, l.tileHeight, l.numXTiles(), l.numYTiles(),
                     l.compression, l.photometric, java.util.Arrays.toString(l.bitsPerSample),
                     l.samplesPerPixel, java.util.Arrays.toString(l.extraSamples)));

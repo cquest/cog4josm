@@ -3,7 +3,7 @@ package org.openstreetmap.josm.plugins.cog.reader;
 import java.io.IOException;
 import java.util.Arrays;
 
-/** ByteSource en memoire pour les tests. */
+/** In-memory ByteSource for tests. */
 final class InMemoryByteSource implements ByteSource {
 
     private final byte[] data;

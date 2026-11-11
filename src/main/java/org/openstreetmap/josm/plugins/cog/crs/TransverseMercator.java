@@ -1,9 +1,9 @@
 package org.openstreetmap.josm.plugins.cog.crs;
 
 /**
- * Projection transverse de Mercator ellipsoidale (Snyder, USGS PP 1312),
- * parametree pour couvrir les fuseaux UTM (k0=0.9996, lon0 = 6*z-183).
- * Series au 6e ordre : precision sub-millimetrique dans un fuseau UTM.
+ * Ellipsoidal transverse Mercator projection (Snyder, USGS PP 1312),
+ * parameterized to cover the UTM zones (k0=0.9996, lon0 = 6*z-183).
+ * 6th-order series: sub-millimetre accuracy within a UTM zone.
  */
 public final class TransverseMercator implements Projection {
 
@@ -24,7 +24,7 @@ public final class TransverseMercator implements Projection {
         this.m0 = meridianArc(this.lat0);
     }
 
-    // Coefficients du developpement de l'arc de meridien (Snyder 3-21)
+    // Coefficients of the meridian arc expansion (Snyder 3-21)
     private double meridianArc(double phi) {
         double e2 = ell.e2;
         double c0 = 1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256;

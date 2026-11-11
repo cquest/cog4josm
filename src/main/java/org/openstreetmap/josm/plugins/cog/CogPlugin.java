@@ -8,8 +8,8 @@ import org.openstreetmap.josm.plugins.PluginInformation;
 import org.openstreetmap.josm.tools.Logging;
 
 /**
- * Plugin JOSM "cog" : affiche en fond des images distantes au format COG
- * (Cloud Optimized GeoTIFF) lues par HTTP byte-ranges.
+ * JOSM "cog" plugin: displays remote images in the COG (Cloud Optimized
+ * GeoTIFF) format as a background layer, read over HTTP byte-ranges.
  */
 public class CogPlugin extends Plugin {
 
@@ -20,26 +20,26 @@ public class CogPlugin extends Plugin {
 
     public CogPlugin(PluginInformation info) {
         super(info);
-        Logging.info("josm-cog : plugin {0} charge (JOSM {1})", PLUGIN_NAME,
+        Logging.info("josm-cog: plugin {0} loaded (JOSM {1})", PLUGIN_NAME,
                 Version.getInstance().getVersionString());
         registerMenuEntry();
     }
 
     /**
-     * Tentative d'ajout de l'entree au menu Imagery ; silencieuse si le menu
-     * n'est pas encore cree (sera retente a l'initialisation du MapFrame).
+     * Attempts to add the entry to the Imagery menu; stays silent when the menu
+     * has not been created yet (it is tried again when the MapFrame is initialized).
      */
     private synchronized void registerMenuEntry() {
         if (menuEntryAdded) {
             return;
         }
         if (MainApplication.getMenu() == null) {
-            Logging.info("josm-cog : menu principal pas encore pret, report a l'ouverture de la carte");
+            Logging.info("josm-cog: main menu not ready yet, deferred until the map is opened");
             return;
         }
         MainApplication.getMenu().imagerySubMenu.add(addCogLayerAction);
         menuEntryAdded = true;
-        Logging.info("josm-cog : entree ajoutee au menu Imagery (fin de liste / sous-menu Plus...)");
+        Logging.info("josm-cog: entry added to the Imagery menu (end of the list / More... sub-menu)");
     }
 
     @Override
@@ -49,7 +49,7 @@ public class CogPlugin extends Plugin {
         }
     }
 
-    /** Action d'ajout d'une couche COG (referencement pour tests/outils). */
+    /** Action that adds a COG layer (exposed for tests/tools). */
     public AddCogLayerAction getAddCogLayerAction() {
         return addCogLayerAction;
     }

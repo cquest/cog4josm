@@ -5,12 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 /**
- * Controle des projections maison contre des valeurs de reference calculees
- * avec GDAL/PROJ (osgeo.osr CoordinateTransformation, axe traditionnel lon/lat).
+ * Check of the in-house projections against reference values computed
+ * with GDAL/PROJ (osgeo.osr CoordinateTransformation, traditional lon/lat order).
  */
 class ProjectionTest {
 
-    /** {lon, lat, x, y} — references EPSG:32631 (UTM 31N, WGS84). */
+    /** {lon, lat, x, y} - EPSG:32631 references (UTM 31N, WGS84). */
     private static final double[][] UTM31N = {
         {2.35, 48.85, 452314.891, 5410984.888},
         {2.294, 48.858, 448214.914, 5411910.786},
@@ -21,7 +21,7 @@ class ProjectionTest {
         {2.35, 46.0, 449669.032, 5094252.863},
     };
 
-    /** References EPSG:32733 (UTM 33S hemisphere sud, WGS84). */
+    /** EPSG:32733 references (UTM 33S, southern hemisphere, WGS84). */
     private static final double[][] UTM33S = {
         {17.5, -33.0, 733569.963, 6345936.665},
         {18.4, -34.35, 812756.208, 6193795.921},
@@ -29,7 +29,7 @@ class ProjectionTest {
         {15.0, -25.0, 500000.000, 7235052.253},
     };
 
-    /** References EPSG:2154 (Lambert-93, RGF97 / GRS80). */
+    /** EPSG:2154 references (Lambert-93, RGF97 / GRS80). */
     private static final double[][] LAMBERT93 = {
         {2.294, 48.858, 648200.220, 6862227.533},
         {2.35, 48.85, 652301.565, 6861302.726},
@@ -63,9 +63,9 @@ class ProjectionTest {
 
     @Test
     void utm33s() {
-        // tolerance elargie : series de Snyder tronquees au 6e ordre, ~3 mm en x
-        // et ~2e-7 deg en longitude inverse a 5 degres du meridien central
-        // (le point 20.5/-30.5 est hors fuseau 33)
+        // widened tolerance: Snyder series truncated at 6th order, ~3 mm in x
+        // and ~2e-7 deg in inverse longitude at 5 degrees from the central meridian
+        // (the 20.5/-30.5 point is outside zone 33)
         check("UTM33S", Crs.forEpsg(32733), UTM33S, 0.01, 1e-5);
     }
 
@@ -74,7 +74,7 @@ class ProjectionTest {
         check("Lambert93", Crs.forEpsg(2154), LAMBERT93, 0.001);
     }
 
-    /** References EPSG:3857 (Web Mercator, sphere a=6378137). */
+    /** EPSG:3857 references (Web Mercator, sphere a=6378137). */
     @Test
     void webMercator() {
         check("WebMerc", Crs.forEpsg(3857), new double[][] {

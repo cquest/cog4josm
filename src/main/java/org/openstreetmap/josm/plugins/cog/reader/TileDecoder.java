@@ -12,10 +12,10 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 
 /**
- * Decodeur de tuiles TIFF pour les compressions frequentes dans les COG :
- * aucune (1), JPEG (6), deflate (8/32946), LZW (5), PackBits (32773).
- * Supporte Gris, Gris+Alpha, RGB, RGBA, 8 et 16 bits, predictor horizontal.
- * Les echantillons supplementaires (ExtraSamples, masque GDAL) sont traites comme alpha.
+ * TIFF tile decoder for the compression schemes often found in COGs:
+ * none (1), JPEG (6), deflate (8/32946), LZW (5), PackBits (32773).
+ * Supports Grey, Grey+Alpha, RGB, RGBA, 8 and 16 bits, horizontal predictor.
+ * Extra samples (ExtraSamples, GDAL mask) are handled as alpha.
  */
 public final class TileDecoder {
 
@@ -26,7 +26,7 @@ public final class TileDecoder {
         if (raw.length >= 2 && (raw[0] & 0xFF) == 0xFF && (raw[1] & 0xD8) == 0xD8) {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(withJpegTables(raw, level.jpegTables)));
             if (img == null) {
-                throw new IOException("Tuile JPEG non decodable (manque peut-etre les tables JPEGTables)");
+                throw new IOException("Cannot decode JPEG tile (the JPEGTables may be missing)");
             }
             return img;
         }
@@ -46,7 +46,7 @@ public final class TileDecoder {
                 px = inflate(raw, false);
                 break;
             default:
-                throw new IOException("Compression TIFF " + level.compression + " non supportee");
+                throw new IOException("TIFF compression " + level.compression + " not supported");
         }
         if (level.predictor == 2) {
             applyHorizontalPredictor(px, level);
@@ -57,17 +57,17 @@ public final class TileDecoder {
     // ---------------------------------------------------------------- JPEG tables
 
     /**
-     * Certaines ecritures TIFF (GDAL, COG driver) stockent les tables JPEG
-     * (quantification DQT...) dans la balise JPEGTables (347) au lieu de les
-     * embarquer dans chaque tuile : le flux de la tuile commence par SOI puis
-     * SOF sans DQT, et ImageIO refuse de le decoder. Reconstitue un flux JPEG
-     * valide en inserant les tables apres le SOI de la balise.
+     * Some TIFF writers (GDAL, COG driver) store the JPEG tables
+     * (DQT quantization...) in the JPEGTables tag (347) instead of embedding
+     * them in every tile: the tile stream starts with SOI then SOF without a
+     * DQT, and ImageIO refuses to decode it. Rebuilds a valid JPEG stream by
+     * inserting the tables after the SOI of the tag.
      */
     static byte[] withJpegTables(byte[] raw, byte[] tables) {
         if (tables == null || tables.length < 4 || (tables[0] & 0xFF) != 0xFF || (tables[1] & 0xD8) != 0xD8) {
             return raw;
         }
-        // scanner les segments jusqu'a SOS : si une DQT est deja presente, rien a faire
+        // scan segments up to SOS: if a DQT is already present, nothing to do
         int i = 2;
         while (i + 1 < raw.length && (raw[i] & 0xFF) == 0xFF) {
             int m = raw[i + 1] & 0xFF;
@@ -90,7 +90,7 @@ public final class TileDecoder {
             }
             i += 2 + len;
         }
-        // bloc tables = SOI + segments, sans l'EOI final eventuel
+        // tables block = SOI + segments, without the possible trailing EOI
         int tlen = tables.length;
         if (tlen >= 2 && (tables[tlen - 2] & 0xFF) == 0xFF && (tables[tlen - 1] & 0xFF) == 0xD9) {
             tlen -= 2;
@@ -120,10 +120,10 @@ public final class TileDecoder {
             }
         } catch (DataFormatException e) {
             if (!rawDeflate) {
-                // Certains ecriseurs ecrivent du deflate "raw" sans en-tete zlib
+                // some writers produce "raw" deflate without a zlib header
                 return inflate(raw, true);
             }
-            throw new IOException("Deflate invalide", e);
+            throw new IOException("Invalid deflate", e);
         } finally {
             in.end();
         }
@@ -140,13 +140,13 @@ public final class TileDecoder {
             if (n >= 0) {
                 int count = n + 1;
                 if (i + count > in.length) {
-                    throw new IOException("PackBits tronque");
+                    throw new IOException("Truncated PackBits");
                 }
                 out.write(in, i, count);
                 i += count;
             } else if (n > -128) {
                 if (i >= in.length) {
-                    throw new IOException("PackBits tronque");
+                    throw new IOException("Truncated PackBits");
                 }
                 int count = 1 - n;
                 for (int k = 0; k < count; k++) {
@@ -193,7 +193,7 @@ public final class TileDecoder {
                 System.arraycopy(prev, 0, entry, 0, prev.length);
                 entry[prev.length] = prev[0];
             } else {
-                throw new IOException("Code LZW invalide : " + code);
+                throw new IOException("Invalid LZW code: " + code);
             }
             out.writeBytes(entry);
             if (prev != null) {
@@ -202,7 +202,7 @@ public final class TileDecoder {
                 added[prev.length] = entry[0];
                 dict.add(added);
                 next = dict.size();
-                // regle TIFF 6.0 (EarlyChange=0) : le decodeur elargit un code avant l'encodeur
+                // TIFF 6.0 rule (EarlyChange=0): the decoder widens a code before the encoder
                 if (next >= (1 << bits) - 1 && bits < 12) {
                     bits++;
                 }
@@ -251,7 +251,7 @@ public final class TileDecoder {
     private static void applyHorizontalPredictor(byte[] px, CogInfo.Level level) throws IOException {
         int b = level.bitsPerSample[0];
         if ((b != 8 && b != 16) || !sameBits(level)) {
-            throw new IOException("Predictor horizontal non supporte pour bits=" + b);
+            throw new IOException("Horizontal predictor not supported for bits=" + b);
         }
         int bytesPerSample = b / 8;
         int stride = level.samplesPerPixel * bytesPerSample;
@@ -261,13 +261,13 @@ public final class TileDecoder {
             for (int s = 0; s < level.samplesPerPixel; s++) {
                 int off = rowBase + s * bytesPerSample;
                 if (off + bytesPerSample > px.length) {
-                    throw new IOException("Donnees de tuile tronquees");
+                    throw new IOException("Truncated tile data");
                 }
                 int prev = readSample(px, off, b, level.bigEndian);
                 for (int x = 1; x < w; x++) {
                     int p = off + x * stride;
                     if (p + bytesPerSample > px.length) {
-                        throw new IOException("Donnees de tuile tronquees");
+                        throw new IOException("Truncated tile data");
                     }
                     int cur = readSample(px, p, b, level.bigEndian);
                     int sum = (prev + cur) & ((1 << b) - 1);
@@ -319,13 +319,13 @@ public final class TileDecoder {
         int bytesPerSample = b / 8;
         long needed = (long) w * h * (spp + (hasAlpha ? 1 : 0)) * bytesPerSample;
         if ((long) px.length < (long) w * h * spp * bytesPerSample) {
-            throw new IOException("Taille de tuile attendue " + needed + " octets, recu " + px.length);
+            throw new IOException("Expected tile size " + needed + " bytes, received " + px.length);
         }
         int stride = (spp + (hasAlpha ? 1 : 0)) * bytesPerSample;
 
         if (b == 16 && spp == 1 && !hasAlpha) {
             if (level.photometric != 1 && level.photometric != 0) {
-                throw new IOException("Photometric " + level.photometric + " en 16 bits non supporte");
+                throw new IOException("Photometric " + level.photometric + " in 16 bits not supported");
             }
             BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_USHORT_GRAY);
             java.awt.image.DataBufferUShort buf =
@@ -342,7 +342,7 @@ public final class TileDecoder {
             return img;
         }
         if (b != 8) {
-            throw new IOException("Profondeur " + b + " bits non supportee");
+            throw new IOException("Bit depth " + b + " not supported");
         }
 
         switch (level.photometric) {
@@ -373,7 +373,7 @@ public final class TileDecoder {
                     }
                     return img;
                 }
-                throw new IOException("Gris avec " + spp + " echantillons non supporte");
+                throw new IOException("Grey with " + spp + " samples not supported");
             }
             case 2: {
                 if (spp == 3 || (spp == 4 && hasAlpha)) {
@@ -390,14 +390,14 @@ public final class TileDecoder {
                     }
                     return img;
                 }
-                throw new IOException("RGB avec " + spp + " echantillons non supporte");
+                throw new IOException("RGB with " + spp + " samples not supported");
             }
             case 3:
-                throw new IOException("TIFF palette (Photometric=3) non supporte");
+                throw new IOException("TIFF palette (Photometric=3) not supported");
             case 6:
-                throw new IOException("YCbCr brut non supporte (devrait passer par JPEG)");
+                throw new IOException("Raw YCbCr not supported (should go through JPEG)");
             default:
-                throw new IOException("Photometric " + level.photometric + " non supporte");
+                throw new IOException("Photometric " + level.photometric + " not supported");
         }
     }
 

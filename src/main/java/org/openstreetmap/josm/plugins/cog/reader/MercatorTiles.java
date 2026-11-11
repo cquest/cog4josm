@@ -1,14 +1,14 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 /**
- * Conversion tuile web-mercatator <-> coordonnees projetees EPSG:3857.
- * (Grille spherique R=6378137 identique a OSM/JOSM/JMapViewer.)
+ * Web-mercator tile <-> EPSG:3857 projected coordinates conversion.
+ * (Spherical grid R=6378137, identical to the OSM/JOSM/JMapViewer one.)
  */
 public final class MercatorTiles {
 
-    /** Rayon de la sphere WGS84 (EPSG:3857), metres. */
+    /** Radius of the WGS84 sphere (EPSG:3857), in metres. */
     public static final double EARTH_RADIUS = 6378137.0;
-    /** Demi-circonference terrestre en metres (pi * 6378137 = 20037508,34...). */
+    /** Half the Earth circumference in metres (pi * 6378137 = 20037508.34...). */
     public static final double HALF_CIRCUMFERENCE = Math.PI * EARTH_RADIUS;
     public static final double MAX_MERC_LAT = 85.05112877980659;
 
@@ -32,17 +32,17 @@ public final class MercatorTiles {
     }
 
     public static double yToLat(double y) {
-        // Inverse de latToY : lat = atan(sinh(y / R)) avec R = HALF_CIRCUMFERENCE / pi
+        // Inverse of latToY: lat = atan(sinh(y / R)) with R = HALF_CIRCUMFERENCE / pi
         double r = HALF_CIRCUMFERENCE / Math.PI;
         return Math.toDegrees(Math.atan(Math.sinh(y / r)));
     }
 
-    /** Bbox 3857 d'une tuile de la grille mondiale OSM (tuiles carrees). */
+    /** 3857 bbox of a tile of the OSM world grid (square tiles). */
     public static Bounds tileBounds(int zoom, int x, int y) {
         double n = Math.pow(2, zoom);
         double minX = (x / n) * 2 * HALF_CIRCUMFERENCE - HALF_CIRCUMFERENCE;
         double maxX = ((x + 1) / n) * 2 * HALF_CIRCUMFERENCE - HALF_CIRCUMFERENCE;
-        // en mercator spherique, y = R*pi*(1 - 2*fraction) : lineaire en fraction de tuile
+        // in spherical mercator, y = R*pi*(1 - 2*fraction): linear in the tile fraction
         double north = HALF_CIRCUMFERENCE * (1 - 2 * (y / n));
         double south = HALF_CIRCUMFERENCE * (1 - 2 * ((y + 1) / n));
         return new Bounds(minX, south, maxX, north);

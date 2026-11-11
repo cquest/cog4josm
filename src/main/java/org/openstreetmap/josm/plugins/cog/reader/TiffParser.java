@@ -10,9 +10,9 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Parseur TIFF/GeoTIFF minimal pour COG : en-tete, chaine d'IFD, tableaux
- * TileOffsets/TileByteCounts, tags geographiques GeoTIFF. Ne lit que les octets
- * strictement necessaires via une {@link ByteSource}.
+ * Minimal TIFF/GeoTIFF parser for COGs: header, IFD chain,
+ * TileOffsets/TileByteCounts arrays, GeoTIFF geographic tags. It reads only the
+ * strictly necessary bytes through a {@link ByteSource}.
  */
 public final class TiffParser {
 
@@ -62,7 +62,7 @@ public final class TiffParser {
     private TiffParser() {
     }
 
-    /** Une entree IFD : tableau de valeurs selon le type. */
+    /** One IFD entry: array of values depending on its type. */
     public static final class IfdEntry {
         public final int type;
         public final long count;
@@ -79,7 +79,7 @@ public final class TiffParser {
         }
     }
 
-    /** Un IFD (repertoire de tags). */
+    /** An IFD (a directory of tags). */
     public static final class Ifd {
         public final long offset;
         public final long nextIfdOffset;
@@ -129,11 +129,11 @@ public final class TiffParser {
         long firstIfd;
     }
 
-    /** Lit l'en-tete puis suit la chaine d'IFD (max 32). */
+    /** Reads the header, then follows the IFD chain (max 32). */
     public static List<Ifd> readIfds(ByteSource src, boolean[] bigEndianOut) throws IOException {
         byte[] head = src.read(0, 8);
         if (head.length < 8) {
-            throw new IOException("Fichier trop court pour etre un TIFF");
+            throw new IOException("File too short to be a TIFF");
         }
         Header h = new Header();
         if (head[0] == 'I' && head[1] == 'I') {
@@ -141,14 +141,14 @@ public final class TiffParser {
         } else if (head[0] == 'M' && head[1] == 'M') {
             h.bigEndian = true;
         } else {
-            throw new IOException("Signature TIFF absente (II/MM)");
+            throw new IOException("Missing TIFF signature (II/MM)");
         }
         int magic = readU16(head, 2, h.bigEndian);
         if (magic == 43) {
-            throw new IOException("BigTIFF non supporte");
+            throw new IOException("BigTIFF not supported");
         }
         if (magic != 42) {
-            throw new IOException("Magic TIFF inattendu : " + magic);
+            throw new IOException("Unexpected TIFF magic: " + magic);
         }
         h.firstIfd = Integer.toUnsignedLong(readInt(head, 4, h.bigEndian));
         if (bigEndianOut != null && bigEndianOut.length > 0) {
@@ -162,7 +162,7 @@ public final class TiffParser {
             off = ifds.get(ifds.size() - 1).nextIfdOffset;
         }
         if (ifds.isEmpty()) {
-            throw new IOException("Aucun IFD trouve");
+            throw new IOException("No IFD found");
         }
         return ifds;
     }
@@ -277,8 +277,8 @@ public final class TiffParser {
     }
 
     /**
-     * Construit une {@link CogInfo} (pyramide de niveaux + georeferencement) a partir
-     * des IFDs d'un COG. Les niveaux sont tries du plus fin au plus grossier.
+     * Builds a {@link CogInfo} (pyramid of levels + georeferencing) from the
+     * IFDs of a COG. Levels are sorted from the finest to the coarsest.
      */
     public static CogInfo parse(ByteSource src) throws IOException {
         boolean[] be = new boolean[1];
@@ -293,9 +293,9 @@ public final class TiffParser {
         if (levels.isEmpty()) {
             Ifd first = ifds.get(0);
             if (first.has(TAG_STRIP_OFFSETS)) {
-                throw new IOException("TIFF base sur des strips (non tuile) : ce n'est pas un COG");
+                throw new IOException("TIFF based on strips (not tiled): this is not a COG");
             }
-            throw new IOException("Aucun niveau tuile trouve (pas un TIFF tuile)");
+            throw new IOException("No tiled level found (not a tiled TIFF)");
         }
         sortLevelsByAreaDesc(levels);
         for (int i = 0; i < levels.size(); i++) {
@@ -304,19 +304,19 @@ public final class TiffParser {
             }
         }
         if ((levels.get(0).flags & 1) != 0) {
-            throw new IOException("IFD de pleine resolution absent");
+            throw new IOException("Missing full resolution IFD");
         }
 
         Ifd geo = ifds.get(0);
         double[] scale = geo.getDoubles(TAG_MODEL_PIXEL_SCALE);
         double[] tie = geo.getDoubles(TAG_MODEL_TIEPOINT);
         if (scale == null || scale.length < 2 || tie == null || tie.length < 6) {
-            throw new IOException("GeoTIFF sans ModelPixelScale/ModelTiepoint : georeferencement inconnu");
+            throw new IOException("GeoTIFF without ModelPixelScale/ModelTiepoint: unknown georeferencing");
         }
         double scaleX = Math.abs(scale[0]);
         double scaleY = Math.abs(scale[1]);
         if (scaleX <= 0 || scaleY <= 0) {
-            throw new IOException("ModelPixelScale nul");
+            throw new IOException("null ModelPixelScale");
         }
         double originX = tie[3] - tie[0] * scaleX;
         double originY = tie[4] + tie[1] * scaleY;
@@ -324,13 +324,13 @@ public final class TiffParser {
         int crs = crsFromGeoKeys(geo);
         CustomCrs custom = null;
         if (crs == 0 || crs == CustomCrs.USER_DEFINED) {
-            // code absent ou "user-defined" : les clefs GeoTIFF decrivent le systeme
+            // missing code or "user-defined": the GeoTIFF keys describe the CRS
             custom = customCrsFromGeoKeys(geo);
         } else {
-            // code enregistre (ex. EPSG:3943 Lambert-43) mais methode declaree
-            // "user-defined" (3074=32767) : le fichier porte les parametres
-            // complets du systeme. On les conserve ; ils serviront de repli si
-            // le code n'est pas au registre (Crs.resolve).
+            // registered code (e.g. EPSG:3943 Lambert-43) but declared method is
+            // "user-defined" (3074=32767): the file carries the full CRS
+            // parameters. They are kept; they act as a fallback when the code is
+            // not in the registry (Crs.resolve).
             CustomCrs c = customCrsFromGeoKeys(geo);
             Integer ct = c == null ? null : c.key(CustomCrs.KEY_PROJ_COORD_TRANS);
             if (ct != null && ct == CustomCrs.USER_DEFINED) {
@@ -343,10 +343,10 @@ public final class TiffParser {
     }
 
     /**
-     * Tri du plus fin au plus grossier par aire croissante… attention : aire
-     * calculee en LONG (131072x98304 = 3x2^32 deborde int et se retrouve 0,
-     * ce qui placait les overviews avant la pleine resolution — erreur
-     * « IFD de pleine resolution absent » sur les gros COG PIX4Dmatic).
+     * Sort from the finest to the coarsest by increasing area... careful: the
+     * area is computed as a LONG (131072x98304 = 3x2^32 overflows an int and
+     * ends up as 0, which placed the overviews before the full resolution -
+     * "Missing full resolution IFD" error on large PIX4Dmatic COGs).
      */
     static void sortLevelsByAreaDesc(List<CogInfo.Level> levels) {
         levels.sort((a, b) -> Long.compare((long) b.width * b.height, (long) a.width * a.height));
@@ -370,7 +370,7 @@ public final class TiffParser {
             return null;
         }
         if (ifd.getLong(TAG_PLANAR_CONFIG, 1) != 1) {
-            throw new IOException("PlanarConfiguration=2 non supporte");
+            throw new IOException("PlanarConfiguration=2 not supported");
         }
         int samples = (int) ifd.getLong(TAG_SAMPLES_PER_PIXEL, 1);
         long[] bps = ifd.getLongs(TAG_BITS_PER_SAMPLE);
@@ -400,7 +400,7 @@ public final class TiffParser {
                 be, offsets, counts, jpegTables);
     }
 
-    /** Tables JPEG de la balise JPEGTables (347), ou null si absente/vide. */
+    /** JPEG tables of the JPEGTables tag (347), or null if missing/empty. */
     private static byte[] readJpegTables(Ifd ifd) {
         IfdEntry e = ifd.entry(TAG_JPEG_TABLES);
         if (e == null || e.longs == null || e.longs.length == 0) {
@@ -413,14 +413,14 @@ public final class TiffParser {
         return out;
     }
 
-    /** Extrait le code EPSG des GeoKeys (1024=type modele, 3072=projected, 2048=geographic). */
+    /** Extracts the EPSG code from the GeoKeys (1024=model type, 3072=projected, 2048=geographic). */
     static int crsFromGeoKeys(Ifd geo) {
         long[] keys = geo.getLongs(TAG_GEO_KEY_DIRECTORY);
         if (keys == null || keys.length < 4) {
             return 0;
         }
         Map<Integer, Integer> values = new HashMap<>();
-        // en-tete : Version, KeyRevision, MinorVersion, NumberOfKeys
+        // header: Version, KeyRevision, MinorVersion, NumberOfKeys
         int n = (int) keys[3];
         for (int i = 0; i < n && 4 + 4 * i + 3 < keys.length; i++) {
             int key = (int) keys[4 + 4 * i];
@@ -441,10 +441,10 @@ public final class TiffParser {
     }
 
     /**
-     * Extrait les GeoKeys bruts d'un systeme "user-defined" (code 32767) :
-     * entries SHORT du repertoire 34735, parametres DOUBLE de la balise 34736
-     * (referonces par indice depuis le champ valeur des clefs) et citation
-     * ASCII 34737. Retourne null si aucun repertoire GeoKeys n'est present.
+     * Extracts the raw GeoKeys of a "user-defined" CRS (code 32767): SHORT
+     * entries of the 34735 directory, DOUBLE parameters of the 34736 tag
+     * (referenced by index from the key value field) and the ASCII citation
+     * 34737. Returns null when no GeoKeys directory is present.
      */
     static CustomCrs customCrsFromGeoKeys(Ifd geo) {
         long[] keys = geo.getLongs(TAG_GEO_KEY_DIRECTORY);
@@ -487,7 +487,7 @@ public final class TiffParser {
 
     public static String describe(List<Ifd> ifds) {
         StringBuilder sb = new StringBuilder(256);
-        sb.append(ifds.size()).append(" IFD(s) :\n");
+        sb.append(ifds.size()).append(" IFD(s):\n");
         for (Ifd ifd : ifds) {
             sb.append(String.format("  IFD@a%d: %dx%d comp=%d photo=%d bps=%s%n",
                     ifd.offset,

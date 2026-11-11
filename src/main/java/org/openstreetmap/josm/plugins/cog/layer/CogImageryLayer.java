@@ -12,9 +12,9 @@ import org.openstreetmap.josm.plugins.cog.reader.CogReader;
 import org.openstreetmap.josm.tools.Logging;
 
 /**
- * Couche d'arriere-plan affichant un COG distant. Reutilise toute la machinerie
- * des couches d'imagerie JOSM (cache, zoom, transparence, filtres) ; seule la
- * fabrication des tuiles est particuliere ({@link CogTileLoader}).
+ * Background layer displaying a remote COG. Reuses all the machinery of JOSM
+ * imagery layers (cache, zoom, transparency, filters); only tile production is
+ * custom ({@link CogTileLoader}).
  */
 public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource> {
 
@@ -50,7 +50,7 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
         return CACHE_NAME;
     }
 
-    /** Usine de chargeurs specifique a cette couche (pas d'override global). */
+    /** Tile loader factory specific to this layer (no global override). */
     @Override
     protected synchronized TileLoaderFactory getTileLoaderFactory() {
         return (listener, headers, minimumExpiry) -> {
@@ -65,7 +65,7 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
 
     @Override
     public String getToolTipText() {
-        return "COG : " + info.getUrl();
+        return "COG: " + info.getUrl();
     }
 
     @Override
@@ -77,7 +77,7 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
         try {
             reader.close();
         } catch (IOException e) {
-            Logging.warn("josm-cog : erreur a la fermeture du lecteur COG : {0}", e);
+            Logging.warn("josm-cog: error while closing the COG reader: {0}", e);
         }
     }
 }

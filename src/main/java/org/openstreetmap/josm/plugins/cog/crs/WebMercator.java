@@ -1,8 +1,8 @@
 package org.openstreetmap.josm.plugins.cog.crs;
 
 /**
- * Web Mercator (EPSG:3857) : sphere de rayon a = 6 378 137 m, formule
- * y = a * ln(tan(pi/4 + phi/2)). C'est la projection des tuiles OSM.
+ * Web Mercator (EPSG:3857): sphere with radius a = 6378137 m, formula
+ * y = a * ln(tan(pi/4 + phi/2)). This is the projection used by OSM tiles.
  */
 public final class WebMercator implements Projection {
 
@@ -14,7 +14,7 @@ public final class WebMercator implements Projection {
     @Override
     public double[] project(double lat, double lon) {
         double phi = Math.toRadians(lat);
-        // bornes usuelles du Web Mercator (lat ~ +-85.051129)
+        // usual Web Mercator limits (lat ~ +-85.051129)
         double y = R * Math.log(Math.tan(Math.PI / 4 + phi / 2));
         return new double[]{Math.toRadians(lon) * R, y};
     }

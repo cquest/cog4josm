@@ -2,11 +2,11 @@ package org.openstreetmap.josm.plugins.cog.reader;
 
 import java.io.IOException;
 
-/** Le serveur ne supporte pas les requis HTTP {@code Range:} : le COG ne peut pas etre lu partiellement. */
+/** The server does not support HTTP {@code Range:} requests: the COG cannot be read partially. */
 public class RangeNotSupportedException extends IOException {
 
     public RangeNotSupportedException(String url) {
-        super("Le serveur ne supporte pas les requetes Range pour " + url
-                + " : impossible de lire le COG par byte-ranges");
+        super("The server does not support Range requests for " + url
+                + ": cannot read the COG by byte-ranges");
     }
 }

@@ -12,9 +12,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Lecture HTTP partielle d'une ressource distante via l'en-tete {@code Range: bytes=...}.
- * Sonde une seule fois le support des ranges (GET {@code bytes=0-0}), met en cache la
- * taille et l'ETag, retry sur les erreurs 5xx.
+ * Partial HTTP read of a remote resource through the {@code Range: bytes=...} header.
+ * Probes range support only once (GET {@code bytes=0-0}), caches the
+ * size and the ETag, retries on 5xx errors.
  */
 public final class HttpRangeReader implements ByteSource {
 
@@ -39,7 +39,7 @@ public final class HttpRangeReader implements ByteSource {
                 .build();
     }
 
-    /** Construit le lecteur et verifie immediatement la taille + le support des ranges. */
+    /** Builds the reader and immediately checks the size + range support. */
     public static HttpRangeReader open(String url, Map<String, String> extraHeaders) throws IOException {
         HttpRangeReader reader = new HttpRangeReader(url, extraHeaders);
         reader.probe();
@@ -81,18 +81,18 @@ public final class HttpRangeReader implements ByteSource {
             String cr = header(resp, "Content-Range");
             Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
             if (m == null || !m.matches()) {
-                throw new IOException("Reponse 206 sans Content-Range valide pour " + uri);
+                throw new IOException("206 response with no valid Content-Range for " + uri);
             }
             String total = m.group(3);
             if ("*".equals(total)) {
-                throw new IOException("Content-Range sans taille totale pour " + uri);
+                throw new IOException("Content-Range without a total size for " + uri);
             }
             size = Long.parseLong(total);
         } else if (status == 200) {
             rangesSupported = false;
             size = resp.body().length;
         } else if (status >= 400) {
-            throw new IOException("HTTP " + status + " en telechargeant " + uri);
+            throw new IOException("HTTP " + status + " while downloading " + uri);
         }
         etag = header(resp, "ETag");
         probed = true;
@@ -131,24 +131,24 @@ public final class HttpRangeReader implements ByteSource {
                 HttpResponse.BodyHandlers.ofByteArray());
         int status = resp.statusCode();
         if (status == 416) {
-            throw new IOException("Range 416 sur " + uri + " (taille=" + size + ", demande=" + offset + ")");
+            throw new IOException("Range 416 on " + uri + " (size=" + size + ", request=" + offset + ")");
         }
         if (status >= 500) {
-            throw new IOException("HTTP " + status + " (retryable) sur " + uri);
+            throw new IOException("HTTP " + status + " (retryable) on " + uri);
         }
         if (status < 200 || status >= 300) {
-            throw new IOException("HTTP " + status + " sur " + uri);
+            throw new IOException("HTTP " + status + " on " + uri);
         }
         byte[] body = resp.body();
         if (status == 206) {
             String cr = header(resp, "Content-Range");
             Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
             if (m != null && m.matches() && Long.parseLong(m.group(1)) != offset) {
-                throw new IOException("Content-Range incoherent pour " + uri + " : " + cr);
+                throw new IOException("Inconsistent Content-Range for " + uri + ": " + cr);
             }
         }
         if (body.length < count) {
-            throw new ShortReadException("Range incomplet (" + body.length + "/" + count + ") sur " + uri);
+            throw new ShortReadException("Incomplete range (" + body.length + "/" + count + ") on " + uri);
         }
         if (body.length > count) {
             byte[] trimmed = new byte[count];
@@ -177,7 +177,7 @@ public final class HttpRangeReader implements ByteSource {
             return client.send(req, handler);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("Requis interrompue : " + uri, e);
+            throw new IOException("Interrupted request: " + uri, e);
         }
     }
 
@@ -201,7 +201,7 @@ public final class HttpRangeReader implements ByteSource {
 
     @Override
     public void close() {
-        // HttpClient se recycle tout seul ; rien a liberer.
+        // the HttpClient recycles itself; nothing to release.
     }
 
     @Override

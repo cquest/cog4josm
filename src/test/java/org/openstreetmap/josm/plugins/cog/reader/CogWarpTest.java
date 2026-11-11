@@ -15,18 +15,18 @@ import org.openstreetmap.josm.plugins.cog.crs.Crs;
 import org.openstreetmap.josm.plugins.cog.crs.Projection;
 
 /**
- * Test du mode reprojection (composeWarp) avec des COG de test declares en
- * Lambert-93 (EPSG:2154) et UTM 31N (EPSG:32631). Les COG sont places sur des
- * ancres verifiees contre GDAL (voir ProjectionTest) :
+ * Test of the reprojection mode (composeWarp) with test COGs declared as
+ * Lambert-93 (EPSG:2154) and UTM 31N (EPSG:32631). The COGs are placed on
+ * anchors verified against GDAL (see ProjectionTest):
  *   Lambert-93 (700000, 6600000) == (3.0E, 46.5N)
  *   UTM 31N    (500000, 5316300.224) == (3.0E, 48.0N)
- * Le motif de pixels etant deterministe (TestTiffWriter.pix), on verifie que
- * chaque pixel d'essai provient bien des coordonnees sources attendues, a
- * l'approximation d'interpolation du maillage pres (tolerance 0.15 px source).
+ * The pixel pattern is deterministic (TestTiffWriter.pix), so we check that
+ * each test pixel comes from the expected source coordinates, within the
+ * mesh interpolation approximation (tolerance 0.15 source px).
  */
 class CogWarpTest {
 
-    /** COG 64x48 px, pixel de 100 unites-modele, 2 niveaux. */
+    /** 64x48 px COG, 100 model-unit pixels, 2 levels. */
     private static CogReader openCog(int crs, double originX, double originY) throws IOException {
         return CogReader.open(new InMemoryByteSource(TestTiffWriter.write(List.of(
                 new TestTiffWriter.LevelSpec(64, 48, 8, 1, 8, false),
@@ -34,7 +34,7 @@ class CogWarpTest {
                 crs, 100.0, originX, originY)));
     }
 
-    /** Bbox 3857 d'un rectangle lat/lon, avec marge fractionnaire. */
+    /** 3857 bbox of a lat/lon rectangle, with fractional margin. */
     private static Bounds bbox3857(double minLon, double minLat, double maxLon, double maxLat, double margin) {
         double dx = (maxLon - minLon) * margin;
         double dy = (maxLat - minLat) * margin;
@@ -43,7 +43,7 @@ class CogWarpTest {
                 MercatorTiles.lonToX(maxLon + dx), MercatorTiles.latToY(maxLat + dy));
     }
 
-    /** Valeur bilineaire du motif pix() aux coordonnees sources (col, row). */
+    /** Bilinear value of the pix() pattern at source coordinates (col, row). */
     private static double[] motifBilinear(double col, double row) {
         int c0 = (int) Math.floor(col);
         int r0 = (int) Math.floor(row);
@@ -61,10 +61,10 @@ class CogWarpTest {
     }
 
     /**
-     * Echantillonne la tuile reprojete : pour chaque point d'essai, calcule les
-     * coordonnees sources attendues par la formule exacte et verifie que la
-     * valeur du pixel sorti est encadree par le motif aux coordonnees attendues
-     * +/- 0.15 px source (couvre l'erreur d'interpolation du maillage).
+     * Samples the reprojected tile: for each test point, computes the expected
+     * source coordinates with the exact formula and checks that the output
+     * pixel value is bracketed by the pattern at the expected coordinates
+     * +/- 0.15 source px (covers the mesh interpolation error).
      */
     private static void checkPlacement(BufferedImage img, Bounds bbox, Projection proj,
                                        double originX, double originY, double res,
@@ -84,14 +84,14 @@ class CogWarpTest {
                     continue;
                 }
                 int argb = img.getRGB(i, j);
-                assertTrue(((argb >>> 24) & 0xFF) > 250, "pixel transparent en (" + i + "," + j + ")");
+                assertTrue(((argb >>> 24) & 0xFF) > 250, "transparent pixel at (" + i + "," + j + ")");
                 for (int ch = 0; ch < 3; ch++) {
                     double min = Double.MAX_VALUE;
                     double max = -Double.MAX_VALUE;
                     for (int dc = -1; dc <= 1; dc++) {
                         for (int dr = -1; dr <= 1; dr++) {
-                            // convention GeoTIFF : le centre du pixel k est en k+0.5,
-                            // le motif est donc evalue en coordonnees "centre entier"
+                            // GeoTIFF convention: the center of pixel k is at k+0.5,
+                            // so the pattern is evaluated at "integer center" coordinates
                             double v = motifBilinear(col - 0.5 + dc * 0.15, row - 0.5 + dr * 0.15)[ch];
                             min = Math.min(min, v);
                             max = Math.max(max, v);
@@ -99,20 +99,20 @@ class CogWarpTest {
                     }
                     int got = (argb >> (16 - 8 * ch)) & 0xFF;
                     assertTrue(got >= min - 2 && got <= max + 2,
-                            "canal " + ch + " pixel (" + i + "," + j + ") source=(" + col + "," + row
-                                    + ") valeur " + got + " hors [" + min + "," + max + "]");
+                            "channel " + ch + " pixel (" + i + "," + j + ") source=(" + col + "," + row
+                                    + ") value " + got + " outside [" + min + "," + max + "]");
                 }
                 checked++;
             }
         }
-        assertTrue(checked >= 20, "trop peu de points verifies : " + checked);
+        assertTrue(checked >= 20, "too few points checked: " + checked);
     }
 
     @Test
     void lambert93Placement() throws IOException {
         Projection l93 = Crs.forEpsg(2154);
         try (CogReader r = openCog(2154, 700000.0, 6600000.0)) {
-            // ancre GDAL : NW du COG = (3.0E, 46.5N) exactement
+            // GDAL anchor: COG NW = (3.0E, 46.5N) exactly
             double[] nw = l93.unproject(700000.0, 6600000.0);
             double[] se = l93.unproject(706400.0, 6595200.0);
             assertEquals(46.5, nw[0], 1e-6);
@@ -144,7 +144,7 @@ class CogWarpTest {
     void nullFarOutsideExtent() throws IOException {
         Projection l93 = Crs.forEpsg(2154);
         try (CogReader r = openCog(2154, 700000.0, 6600000.0)) {
-            // tuile web loin de l'emprise (pole sud)
+            // web tile far from the extent (south pole)
             Bounds bbox = MercatorTiles.tileBounds(5, 0, 0);
             assertNull(CogComposer.composeWarp(r, l93, bbox, 256));
         }

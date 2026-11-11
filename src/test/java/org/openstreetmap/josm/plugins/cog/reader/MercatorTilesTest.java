@@ -22,8 +22,8 @@ class MercatorTilesTest {
 
     @Test
     void mercatorKnownValues() {
-        // Valeurs absolues (EPSG:3857 officiel, R=6378137) : un facteur pi
-        // commun a latToY/yToLat passerait inapercu en aller-retour seul.
+        // Absolute values (official EPSG:3857, R=6378137): a pi factor common
+        // to latToY/yToLat would go unnoticed in a round trip alone.
         assertEquals(0.0, MercatorTiles.latToY(0.0), 1e-6);
         assertEquals(0.0, MercatorTiles.yToLat(0.0), 1e-9);
         assertEquals(6240993.463, MercatorTiles.latToY(48.80), 1.0);
@@ -32,7 +32,7 @@ class MercatorTilesTest {
         assertEquals(48.92, MercatorTiles.yToLat(6261297.953), 1e-6);
         assertEquals(250468.854, MercatorTiles.lonToX(2.25), 1.0);
         assertEquals(2.25, MercatorTiles.xToLon(250468.854), 1e-6);
-        // Limites : +-180 deg <-> +-demi-circonference
+        // Limits: +-180 deg <-> +-half-circumference
         assertEquals(MercatorTiles.HALF_CIRCUMFERENCE, MercatorTiles.lonToX(180.0), 1e-6);
         assertEquals(-MercatorTiles.MAX_MERC_LAT, MercatorTiles.yToLat(-MercatorTiles.HALF_CIRCUMFERENCE), 1e-6);
     }

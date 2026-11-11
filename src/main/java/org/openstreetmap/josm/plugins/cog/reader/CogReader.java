@@ -9,8 +9,8 @@ import java.util.Map;
 import java.awt.image.BufferedImage;
 
 /**
- * Point d'entree : ouvre un COG via une {@link ByteSource}, parse les en-tetes,
- * puis fournit les tuiles decodees avec un cache LRU en memoire.
+ * Entry point: opens a COG through a {@link ByteSource}, parses the headers,
+ * then provides the decoded tiles with an in-memory LRU cache.
  */
 public final class CogReader implements Closeable {
 
@@ -56,11 +56,11 @@ public final class CogReader implements Closeable {
         return source;
     }
 
-    /** Tuile decodee du niveau {@code level} a la position de tuile (tx, ty). */
+    /** Decoded tile of level {@code level} at tile position (tx, ty). */
     public BufferedImage getTile(int level, int tx, int ty) throws IOException {
         CogInfo.Level lvl = info.level(level);
         if (!lvl.hasTile(tx, ty)) {
-            throw new IOException("Tuile hors pyramide : niveau " + level + " tuile " + tx + "," + ty
+            throw new IOException("Tile outside the pyramid: level " + level + " tile " + tx + "," + ty
                     + " (" + lvl.numXTiles() + "x" + lvl.numYTiles() + ")");
         }
         String key = level + "/" + tx + "/" + ty;

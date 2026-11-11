@@ -15,11 +15,11 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 /**
- * Serveur HTTP statique minimaliste avec support des requetes byte-ranges
- * (indispensable pour servir un COG), uniquement en JDK.
+ * Minimal static HTTP server supporting byte-range requests
+ * (essential to serve a COG), using only the JDK.
  *
- * Usage : java org.openstreetmap.josm.plugins.cog.tools.CogFileServer &lt;repertoire&gt; &lt;port&gt;
- * Uniquement destine aux tests (servir un COG d'exemple a JOSM).
+ * Usage: java org.openstreetmap.josm.plugins.cog.tools.CogFileServer &lt;directory&gt; &lt;port&gt;
+ * Meant for tests only (serving a sample COG to JOSM).
  */
 public final class CogFileServer {
 
@@ -30,7 +30,7 @@ public final class CogFileServer {
 
     public static void main(String[] args) throws IOException {
         if (args.length != 2) {
-            System.err.println("usage: CogFileServer <repertoire> <port>");
+            System.err.println("usage: CogFileServer <directory> <port>");
             System.exit(2);
         }
         Path root = Paths.get(args[0]).toAbsolutePath().normalize();
@@ -38,7 +38,7 @@ public final class CogFileServer {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/", exchange -> handle(exchange, root));
         server.start();
-        System.out.println("CogFileServer a l'ecoute sur http://127.0.0.1:" + port + "/ racine=" + root);
+        System.out.println("CogFileServer listening on http://127.0.0.1:" + port + "/ root=" + root);
     }
 
     private static void handle(HttpExchange exchange, Path root) throws IOException {
@@ -75,8 +75,8 @@ public final class CogFileServer {
                 partial = true;
             }
             long len = end - start + 1;
-            System.out.println(path + " : " + (partial ? "206 range " + start + "-" + end : "200 tout")
-                    + " (" + len + " octets)");
+            System.out.println(path + ": " + (partial ? "206 range " + start + "-" + end : "200 full")
+                    + " (" + len + " bytes)");
             if ("HEAD".equals(exchange.getRequestMethod())) {
                 if (partial) {
                     exchange.getResponseHeaders().add("Content-Range", "bytes " + start + "-" + end + "/" + size);

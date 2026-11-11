@@ -22,8 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Test de bout en bout : COG servi par un HTTP server local qui gere l'en-tete
- * Range, lu par HttpRangeReader puis decompose en tuiles.
+ * End-to-end test: COG served by a local HTTP server handling the Range
+ * header, read by HttpRangeReader then decomposed into tiles.
  */
 class HttpRangeReaderTest {
 
@@ -80,7 +80,7 @@ class HttpRangeReaderTest {
         }
     }
 
-    /** Serveur qui ignore Range : renvoie toujours 200 plein (mauvais citizen). */
+    /** Server that ignores Range: always returns a full 200 (bad citizen). */
     private void serveNoRange(HttpExchange ex) throws IOException {
         try {
             byte[] tiff = cogBytes();
@@ -122,9 +122,9 @@ class HttpRangeReaderTest {
         try (CogReader r = CogReader.open(url("/image.tif"))) {
             BufferedImage img = r.getTile(0, 2, 2);
             assertEquals(16, img.getWidth());
-            assertTrue(fullHits.get() == 0, "aucun telechargement complet");
-            assertTrue(rangeHits.get() >= 4, "lectures partielles seulement : " + rangeHits.get());
-            assertTrue(rangeHits.get() < 40, "evite le mitrage : " + rangeHits.get());
+            assertTrue(fullHits.get() == 0, "no full download");
+            assertTrue(rangeHits.get() >= 4, "partial reads only: " + rangeHits.get());
+            assertTrue(rangeHits.get() < 40, "avoids chatty requests: " + rangeHits.get());
         }
     }
 
@@ -136,7 +136,7 @@ class HttpRangeReaderTest {
 
     @Test
     void rangeRequestIsValidPercentEncodedUrl() throws IOException {
-        // fumeux mais valide : URL encodee ne doit pas casser le reader
+        // dodgy but valid: the encoded URL must not break the reader
         String path = URLDecoder.decode("%2Fimage.tif", StandardCharsets.UTF_8);
         assertEquals("/image.tif", path);
         try (CogReader r = CogReader.open(url("/image.tif"))) {

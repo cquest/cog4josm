@@ -4,7 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Ecrivain de petits TIFF tuiles (COG-like) valides pour les tests. */
+/** Writer for small tiled TIFFs (COG-like) that are valid for tests. */
 final class TestTiffWriter {
 
     static final int TILE = 16;
@@ -12,7 +12,7 @@ final class TestTiffWriter {
     record LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey) {
     }
 
-    /** Pixel de reference : fonction deterministe des coordonnees image. */
+    /** Reference pixel: deterministic function of image coordinates. */
     static int pix(int x, int y, int channel, int bits) {
         return (x * 7 + y * 13 + channel * 31 + 5) & ((1 << bits) - 1);
     }
@@ -23,9 +23,9 @@ final class TestTiffWriter {
     }
 
     /**
-     * Variante avec GeoKeys "user-defined" : {@code customKeys} est le contenu
-     * complet du repertoire 34735 (en-tete 4 shorts + entries), {@code customDoubles}
-     * le tableau DOUBLE de la balise 34736 (peut etre null/vide).
+     * Variant with "user-defined" GeoKeys: {@code customKeys} is the complete
+     * content of the 34735 directory (4-short header + entries), {@code customDoubles}
+     * the DOUBLE array of tag 34736 (may be null/empty).
      */
     static byte[] write(List<LevelSpec> levels, int crs, int[] customKeys, double[] customDoubles,
                         double scaleX, double originX, double originY) throws java.io.IOException {
@@ -34,17 +34,17 @@ final class TestTiffWriter {
         int nCustomDbl = customDoubles == null ? 0 : customDoubles.length;
         if (nCustomKeys > 0) {
             if (nCustomKeys % 4 != 0 || customKeys[3] != (nCustomKeys - 4) / 4) {
-                throw new IllegalArgumentException("repertoire GeoKeys incoherent : "
-                        + nCustomKeys + " shorts, en-tete NumberOfKeys=" + customKeys[3]);
+                throw new IllegalArgumentException("inconsistent GeoKeys directory: "
+                        + nCustomKeys + " shorts, header NumberOfKeys=" + customKeys[3]);
             }
             for (int i = 0; i < nCustomKeys; i++) {
                 if (customKeys[i] < 0 || customKeys[i] > 65535) {
-                    throw new IllegalArgumentException("valeur GeoKey hors short non signe : " + customKeys[i]);
+                    throw new IllegalArgumentException("GeoKey value outside unsigned short: " + customKeys[i]);
                 }
             }
         }
 
-        // 1. tuiles compressees
+        // 1. compressed tiles
         List<byte[]> tiles = new ArrayList<>();
         int[] perLevel = new int[nl];
         for (int i = 0; i < nl; i++) {
@@ -59,7 +59,7 @@ final class TestTiffWriter {
             }
         }
 
-        // 2. positions : IFDs collés apres l'en-tete, puis blocs externes, puis tuiles
+        // 2. layout: IFDs right after the header, then external blocks, then tiles
         int[] entries = new int[nl];
         for (int i = 0; i < nl; i++) {
             entries[i] = 13 + (i == 0 ? 3 + (nCustomKeys > 0 ? 2 : 0) : 0);
@@ -89,7 +89,7 @@ final class TestTiffWriter {
             pos += tiles.get(i).length;
         }
 
-        // 3. ecriture sequentielle (les offsets sont deja connus)
+        // 3. sequential write (the offsets are already known)
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         out.write(new byte[]{'I', 'I'});
         out.write(leU16(42));
@@ -116,10 +116,10 @@ final class TestTiffWriter {
         return s;
     }
 
-    /** Taille du bloc geographique (scale + tiepoint + geokeys), exactement ce que writeExt ecrit. */
+    /** Size of the geographic block (scale + tiepoint + geokeys), exactly what writeExt writes. */
     private static long geoBlockSize(int nCustomKeys, int nCustomDbl) {
         if (nCustomKeys <= 0) {
-            return 96; // scale(24) + tiepoint(48) + 12 clefs short(24)
+            return 96; // scale(24) + tiepoint(48) + 12 short keys(24)
         }
         return 72 + 2L * nCustomKeys + 8L * nCustomDbl + CITATION.length() + 1;
     }
@@ -128,9 +128,9 @@ final class TestTiffWriter {
                                  long ext, int n, int firstTile, long[] tileOff, long[] tileCnt,
                                  int crs, int nCustomKeys, int nCustomDbl)
             throws java.io.IOException {
-        // le bloc custom (34736/34737) depend de la presence des clefs, pas de la
-        // valeur de crs : un cas « hybride » (code enregistre + parametres, cf.
-        // PIX4Dmatic) doit garder exactly la meme repartition des octets
+        // the custom block (34736/34737) depends on the presence of the keys, not
+        // on the crs value: a "hybrid" case (registered code + parameters, cf.
+        // PIX4Dmatic) must keep exactly the same byte layout
         boolean custom = i == 0 && nCustomKeys > 0;
         long bpsOff = ext + 8L * n;
         long geoBase = bpsOff + (lv.grey() ? 0 : 6);
@@ -214,18 +214,18 @@ final class TestTiffWriter {
     private static final String CITATION = "josm-cog test citation";
 
     /**
-     * Repertoire GeoKeys d'un systeme projetes Lambert-93 "user-defined"
-     * (codes 32767), ecrit tel que GDAL >= 3 le produirait : clefs DOUBLE
-     * referencees dans la balise 34736. Renvoie {keys, doubles, originAnchorOk}.
+     * GeoKeys directory of a "user-defined" Lambert-93 projected system
+     * (codes 32767), written the way GDAL >= 3 would produce it: DOUBLE keys
+     * referenced in tag 34736. Returns {keys, doubles, originAnchorOk}.
      */
     static int[] customKeysLcc(double[] doublesOutHolder) {
         return customKeysLcc(doublesOutHolder, 32767, 32767);
     }
 
     /**
-     * Meme repertoire mais 3072/2048 portent des codes enregistres : variante
-     * « hybride » exportee par PIX4Dmatic (ex. EPSG:3943 + 3074=32767 et tous
-     * les parametres en DOUBLE, cf. COG_BayonneSudEst.tif).
+     * Same directory but 3072/2048 carry registered codes: "hybrid" variant
+     * exported by PIX4Dmatic (e.g. EPSG:3943 + 3074=32767 and all parameters
+     * as DOUBLE, cf. COG_BayonneSudEst.tif).
      */
     static int[] customKeysLcc(double[] doublesOutHolder, int pcsCode, int gcsCode) {
         double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
@@ -233,24 +233,24 @@ final class TestTiffWriter {
             System.arraycopy(d, 0, doublesOutHolder, 0, d.length);
         }
         return new int[]{
-                1, 1, 0, 17, // en-tete : 17 clefs
+                1, 1, 0, 17, // header: 17 keys
                 1024, 0, 1, 1,       // ModelTypeGeoKey = Projected
-                2048, 0, 1, gcsCode, // GCS (user-defined ou code enregistre)
-                2054, 0, 1, 9102, // unites angulaires : degres
-                2056, 0, 1, 7019, // ellipsoide GRS 1980
-                2057, 34736, 1, 7,   // demi-grand axe -> dbl[7]
-                2059, 34736, 1, 6,   // aplatissement inverse -> dbl[6]
-                2061, 34736, 1, 8,   // meridien principal -> dbl[8]
-                3072, 0, 1, pcsCode, // PCS (user-defined ou code enregistre)
+                2048, 0, 1, gcsCode, // GCS (user-defined or registered code)
+                2054, 0, 1, 9102, // angular units: degrees
+                2056, 0, 1, 7019, // GRS 1980 ellipsoid
+                2057, 34736, 1, 7,   // semi-major axis -> dbl[7]
+                2059, 34736, 1, 6,   // inverse flattening -> dbl[6]
+                2061, 34736, 1, 8,   // prime meridian -> dbl[8]
+                3072, 0, 1, pcsCode, // PCS (user-defined or registered code)
                 3074, 0, 1, 32767, // ProjCoordTrans user-defined
-                3075, 0, 1, 8,     // methode = Lambert Conf Conic 2SP
-                3076, 0, 1, 9001,  // unites lineaires : metre
-                3078, 34736, 1, 2,   // parallele d'entree/sortie 1 -> dbl[2]
-                3079, 34736, 1, 3,   // parallele d'entree/sortie 2 -> dbl[3]
-                3084, 34736, 1, 1,   // fausse origine longitude -> dbl[1]
-                3085, 34736, 1, 0,   // fausse origine latitude -> dbl[0]
-                3086, 34736, 1, 4,   // fausse est -> dbl[4]
-                3087, 34736, 1, 5,   // fausse nord -> dbl[5]
+                3075, 0, 1, 8,     // method = Lambert Conf Conic 2SP
+                3076, 0, 1, 9001,  // linear units: metre
+                3078, 34736, 1, 2,   // standard parallel 1 -> dbl[2]
+                3079, 34736, 1, 3,   // standard parallel 2 -> dbl[3]
+                3084, 34736, 1, 1,   // false origin longitude -> dbl[1]
+                3085, 34736, 1, 0,   // false origin latitude -> dbl[0]
+                3086, 34736, 1, 4,   // false easting -> dbl[4]
+                3087, 34736, 1, 5,   // false northing -> dbl[5]
         };
     }
 
@@ -269,7 +269,7 @@ final class TestTiffWriter {
                         v = (v - left) & ((1 << lv.bits()) - 1);
                     }
                     if (bytes == 2) {
-                        // fichier little-endian ('II') : octet de poids faible d'abord
+                        // little-endian file ('II'): least significant byte first
                         raw.write(v & 0xFF);
                         raw.write((v >> 8) & 0xFF);
                     } else {
@@ -284,7 +284,7 @@ final class TestTiffWriter {
             case 8: case 32946: return TestCodecs.deflate(bytesArr);
             case 32773: return TestCodecs.packBitsEncode(bytesArr);
             case 5: return TestCodecs.lzwEncode(bytesArr);
-            default: throw new IllegalArgumentException("compression inconnue " + lv.compression());
+            default: throw new IllegalArgumentException("unknown compression " + lv.compression());
         }
     }
 

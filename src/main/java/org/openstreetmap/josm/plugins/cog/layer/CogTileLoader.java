@@ -12,9 +12,8 @@ import org.openstreetmap.josm.data.cache.BufferedImageCacheEntry;
 import org.openstreetmap.josm.data.imagery.TileJobOptions;
 
 /**
- * Chargeur de tuiles "COG" : ne telecharge aucune URL, fabrique les tuiles a la
- * volee a partir du lecteur COG attache a la source de tuiles (byte-ranges +
- * recomposition).
+ * "COG" tile loader: it downloads no URL and builds the tiles on the fly from
+ * the COG reader attached to the tile source (byte-ranges + reassembly).
  */
 public final class CogTileLoader implements TileLoader {
 
@@ -24,10 +23,9 @@ public final class CogTileLoader implements TileLoader {
     private volatile ExecutorService pool;
 
     /**
-     * Constructeur standard exige par la reflexion de CachedTileLoaderFactory
-     * (JOSM le recherche a la construction de la couche). Le cache JCS et les
-     * options de telechargement HTTP ne sont pas utilises ici : les tuiles
-     * sont synthetisees, jamais telechargees par URL.
+     * Standard constructor required by the reflection used in CachedTileLoaderFactory
+     * (JOSM looks it up when the layer is created). The JCS cache and the HTTP
+     * download options are not used here: tiles are synthesized, never downloaded by URL.
      */
     public CogTileLoader(TileLoaderListener listener, ICacheAccess<String, BufferedImageCacheEntry> cache,
             TileJobOptions options) {
@@ -67,7 +65,7 @@ public final class CogTileLoader implements TileLoader {
         current.shutdownNow();
     }
 
-    /** Arret definitif (couche detruite). */
+    /** Permanent shutdown (layer destroyed). */
     public void dispose() {
         pool.shutdownNow();
     }

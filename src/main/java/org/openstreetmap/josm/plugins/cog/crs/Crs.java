@@ -5,22 +5,21 @@ import java.util.Locale;
 import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
 
 /**
- * Registre des projections supportees par le plugin.
+ * Registry of projections supported by the plugin.
  *
- * Volumes pris en charge :
+ * Covered scopes:
  * <ul>
- *   <li>EPSG:4326 (geographique WGS84) et EPSG:3857 (Web Mercator) ;</li>
- *   <li>UTM WGS84 : zones nord 32601-32660, zones sud 32701-32760 ;</li>
- *   <li>EPSG:2154 (RGF97 / Lambert-93, France metropolitaine) ;</li>
- *   <li>systemes "user-defined" des GeoKeys GeoTIFF (codes 32767) lorsque
- *       leurs parametres correspondent a un modele connu : geographique,
- *       transverse de Mercator ou conique conforme de Lambert (phase 2.1,
- *       voir {@link #fromCustom}).</li>
+ *   <li>EPSG:4326 (WGS84 geographic) and EPSG:3857 (Web Mercator);</li>
+ *   <li>WGS84 UTM: north zones 32601-32660, south zones 32701-32760;</li>
+ *   <li>EPSG:2154 (RGF97 / Lambert-93, metropolitan France);</li>
+ *   <li>GeoTIFF GeoKey "user-defined" systems (codes 32767) when their
+ *       parameters match a known model: geographic, transverse Mercator or
+ *       Lambert conformal conic (phase 2.1, see {@link #fromCustom}).</li>
  * </ul>
- * Les datums non-WGS84 (NTF, SAD69...) sont traites comme WGS84 : erreur
- * metrologique de l'ordre de la centaine de metres, acceptable pour un fond
- * d'carte mais documentee. Les systemes custom sont en revanche projetes sur
- * leur propre ellipsoide (pas de datum shift, meme remarque).
+ * Non-WGS84 datums (NTF, SAD69...) are treated as WGS84: metrology error on
+ * the order of a hundred metres, acceptable for a background map but
+ * documented. Custom systems are on the other hand projected onto their own
+ * ellipsoid (no datum shift, same caveat).
  */
 public final class Crs {
 
@@ -29,7 +28,7 @@ public final class Crs {
     private Crs() {
     }
 
-    /** Projection pour ce code EPSG, ou null si non supportee. */
+    /** Projection for this EPSG code, or null when unsupported. */
     public static synchronized Projection forEpsg(int epsg) {
         Projection p = CACHE.get(epsg);
         if (p == null) {
@@ -46,12 +45,12 @@ public final class Crs {
     }
 
     /**
-     * Projection declaree par un COG : code EPSG enregistre si le registre le
-     * connait, sinon repli sur les parametres GeoKeys "user-defined" (3074=32767)
-     * que certains ecriveurs joignent a un code non repertorie (ex. exports
-     * PIX4Dmatic vers Lambert-43/EPSG:3943). Null si aucun systeme n'est
-     * resolvable ; le motif d'echec du repli s'obtient en rappelant
-     * {@link #fromCustom} (IllegalArgumentException).
+     * Projection declared by a COG: registered EPSG code when the registry
+     * knows it, otherwise fallback on the "user-defined" GeoKeys parameters
+     * (3074=32767) that some writers attach to an unlisted code (e.g.
+     * PIX4Dmatic exports to Lambert-43/EPSG:3943). Null when no system can be
+     * resolved; the fallback failure reason is obtained by calling
+     * {@link #fromCustom} again (IllegalArgumentException).
      */
     public static Projection resolve(int crsCode, CustomCrs custom) {
         if (crsCode != 0 && crsCode != CustomCrs.USER_DEFINED) {
@@ -99,27 +98,27 @@ public final class Crs {
                 0.9996, 6.0 * zone - 183.0, 0.0, 500000.0, south ? 10000000.0 : 0.0);
     }
 
-    // ------------------------------------------------ systemes "user-defined"
+    // ------------------------------------------------ "user-defined" systems
 
     /**
-     * Convertit les GeoKeys "user-defined" (codes 32767) d'un COG en projection
-     * du paquetage : mapping declaratif des parametres GeoTIFF (degres,
-     * metres) vers les constructeurs existants ({@link Geographic},
-     * {@link TransverseMercator}, {@link LambertConformalConic2SP}). Aucune
-     * nouvelle formule de projection n'est introduite ; un systeme dont le
-     * modele n'est pas representable par ces classes leve une
-     * IllegalArgumentException explicite (jamais de reprojection implicite).
+     * Converts a COG's "user-defined" GeoKeys (codes 32767) into a package
+     * projection: declarative mapping of GeoTIFF parameters (degrees, metres)
+     * onto the existing constructors ({@link Geographic},
+     * {@link TransverseMercator}, {@link LambertConformalConic2SP}). No new
+     * projection formula is introduced; a system whose model cannot be
+     * represented by these classes raises an explicit IllegalArgumentException
+     * (never an implicit reprojection).
      *
-     * Le datum est ignore (traites comme le systeme de 1er ordre) : precision
-     * documentee, comparable au cas des codes EPSG non-WGS84.
+     * The datum is ignored (systems are treated as first-order): documented
+     * accuracy, comparable to the non-WGS84 EPSG code case.
      *
-     * @return la projection resolue
-     * @throws IllegalArgumentException si les clefs sont incompletes ou decrivent
-     *         un modele non supporte
+     * @return the resolved projection
+     * @throws IllegalArgumentException if the keys are incomplete or describe
+     *         an unsupported model
      */
     public static Projection fromCustom(CustomCrs c) {
         if (c == null) {
-            throw new IllegalArgumentException("definition custom absente");
+            throw new IllegalArgumentException("missing custom definition");
         }
         Integer model = c.key(CustomCrs.KEY_MODEL_TYPE);
         if (model != null && model == CustomCrs.MODEL_TYPE_GEOGRAPHIC) {
@@ -128,24 +127,24 @@ public final class Crs {
         if (model == null || model == 1) {
             return projected(c);
         }
-        throw new IllegalArgumentException("modele GeoTIFF 1024=" + model + " non supporte");
+        throw new IllegalArgumentException("unsupported GeoTIFF model 1024=" + model);
     }
 
     private static Projection geographic(CustomCrs c) {
         Integer gcs = c.key(CustomCrs.KEY_GEOG_CODE);
         if (gcs != null && gcs != CustomCrs.USER_DEFINED) {
-            throw new IllegalArgumentException("GCS enregistre " + gcs + " : clefs custom incoherentes");
+            throw new IllegalArgumentException("registered GCS " + gcs + ": inconsistent custom keys");
         }
         Integer units = c.key(CustomCrs.KEY_GEOG_AZIMUTH_UNITS);
         if (units != null && units != CustomCrs.UNIT_DEGREE) {
-            throw new IllegalArgumentException("unites angulaires GeoKey 2054=" + units
-                    + " : seuls les degres sont supportes");
+            throw new IllegalArgumentException("angular units GeoKey 2054=" + units
+                    + ": only degrees are supported");
         }
         double pm = optDouble(c, CustomCrs.KEY_GEOG_PRIME_MERIDIAN, 0.0);
         if (!(Math.abs(pm) <= 180.0)) {
-            throw new IllegalArgumentException("meridien principal (2061) hors bornes : " + pm);
+            throw new IllegalArgumentException("principal meridian (2061) out of range: " + pm);
         }
-        ellipsoid(c); // valide les parametres d'ellipsoide (non utilise pour x/y en degres)
+        ellipsoid(c); // validates ellipsoid parameters (unused for x/y in degrees)
         return new Geographic(0, pm);
     }
 
@@ -154,13 +153,13 @@ public final class Crs {
         Integer coordTrans = c.key(CustomCrs.KEY_PROJ_COORD_TRANS);
         if (pcs != null && pcs != CustomCrs.USER_DEFINED
                 && (coordTrans == null || coordTrans != CustomCrs.USER_DEFINED)) {
-            // code enregistre sans methode "user-defined" : pas de parametres
-            // exploitables, c'est une clef GeoTIFF classique mal routee ici
-            throw new IllegalArgumentException("projection enregistree " + pcs
-                    + " : clefs custom incoherentes");
+            // registered code without a "user-defined" method: no usable
+            // parameters, this is a plain GeoTIFF key misrouted here
+            throw new IllegalArgumentException("registered projection code " + pcs
+                    + ": inconsistent custom keys");
         }
-        // sinon : 3074=32767 garantit que les parametres de methode sont presents
-        // (convention GDAL/PIX4D), meme si 3072 porte un code enregistre (hybride)
+        // otherwise: 3074=32767 guarantees the method parameters are present
+        // (GDAL/PIX4D convention), even when 3072 holds a registered code (hybrid)
         Integer methodCode = c.key(CustomCrs.KEY_PROJ_METHOD_CODE);
         int method = resolveMethod(coordTrans, methodCode);
 
@@ -168,11 +167,11 @@ public final class Crs {
         int units = unitsKey == null ? 9001 : unitsKey;
         Double unitFactor = CustomCrs.linearToMetre(units);
         if (unitFactor == null) {
-            throw new IllegalArgumentException("unites lineaires GeoKey 3076=" + units + " non supportees");
+            throw new IllegalArgumentException("unsupported linear units GeoKey 3076=" + units);
         }
         Double k0 = c.dbl(CustomCrs.KEY_PROJ_SCALE_FACTOR);
         if (k0 != null && (k0 <= 0 || !Double.isFinite(k0))) {
-            throw new IllegalArgumentException("facteur d'echelle (3092) invalide : " + k0);
+            throw new IllegalArgumentException("invalid scale factor (3092): " + k0);
         }
         Ellipsoid ell = ellipsoid(c);
 
@@ -198,7 +197,7 @@ public final class Crs {
                 checkLatLon(sp1, 0);
                 checkLatLon(sp2, 0);
                 if (Math.abs(sp1) < 1e-12 && Math.abs(sp2) < 1e-12) {
-                    throw new IllegalArgumentException("paralleles d'entree/sortie nuls (3078/3079)");
+                    throw new IllegalArgumentException("null standard parallels (3078/3079)");
                 }
                 p = new LambertConformalConic2SP(0, ell, sp1, sp2, lat0, lon0, fe, fn, k0);
                 break;
@@ -210,13 +209,13 @@ public final class Crs {
                 double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0);
                 double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_NORTHING, 0.0);
                 checkLatLon(lat0, lon0);
-                // Lambert 1SP = 2SP avec paralleles confondus ; k0 = 1 sauf mention
+                // Lambert 1SP = 2SP with coincident parallels; k0 = 1 unless stated
                 p = new LambertConformalConic2SP(0, ell, lat0, lat0, lat0, lon0, fe, fn,
                         k0 == null ? 1.0 : k0);
                 break;
             }
             default:
-                throw new IllegalArgumentException("modele de projection non supporte : "
+                throw new IllegalArgumentException("unsupported projection model: "
                         + describeMethod(coordTrans, methodCode));
         }
         if (unitFactor == 1.0) {
@@ -225,7 +224,7 @@ public final class Crs {
         return new Scaled(p, unitFactor);
     }
 
-    /** Reconcilie le type de transformation (3074) et le code de methode (3075). */
+    /** Reconciles the transformation type (3074) with the method code (3075). */
     private static int resolveMethod(Integer coordTrans, Integer methodCode) {
         if (coordTrans != null && coordTrans != CustomCrs.USER_DEFINED) {
             return coordTrans;
@@ -233,7 +232,7 @@ public final class Crs {
         if (methodCode != null) {
             return methodCode;
         }
-        throw new IllegalArgumentException("modele de projection non declare (GeoKeys 3074/3075 absents)");
+        throw new IllegalArgumentException("undeclared projection model (GeoKeys 3074/3075 missing)");
     }
 
     private static String describeMethod(Integer coordTrans, Integer methodCode) {
@@ -241,15 +240,15 @@ public final class Crs {
     }
 
     /**
-     * Ellipsoide des clefs custom : parametres 2057/2059 en priorite, sinon
-     * code d'ellipsoide (2056) ou de datum (2050) connu de la table GeoTIFF.
+     * Ellipsoid from the custom keys: 2057/2059 parameters take priority,
+     * otherwise a GeoTIFF-table ellipsoid (2056) or datum (2050) code.
      */
     private static Ellipsoid ellipsoid(CustomCrs c) {
         Double a = c.dbl(CustomCrs.KEY_GEOG_SEMI_MAJOR);
         Double rf = c.dbl(CustomCrs.KEY_GEOG_INV_FLATTENING);
         if (a != null && rf != null) {
             if (!Double.isFinite(a) || !Double.isFinite(rf) || a <= 0 || rf < 0) {
-                throw new IllegalArgumentException("ellipsoide custom invalide : a=" + a + ", 1/f=" + rf);
+                throw new IllegalArgumentException("invalid custom ellipsoid: a=" + a + ", 1/f=" + rf);
             }
             return Ellipsoid.of(a, rf);
         }
@@ -262,15 +261,15 @@ public final class Crs {
             if (e != null) {
                 return e;
             }
-            throw new IllegalArgumentException("code d'ellipsoide GeoTIFF inconnu : " + code);
+            throw new IllegalArgumentException("unknown GeoTIFF ellipsoid code: " + code);
         }
-        throw new IllegalArgumentException("ellipsoide non define (GeoKeys 2056/2057/2059 absents)");
+        throw new IllegalArgumentException("undefined ellipsoid (GeoKeys 2056/2057/2059 missing)");
     }
 
     private static double reqDouble(CustomCrs c, int id, int shownId) {
         Double v = c.dbl(id);
         if (v == null || !Double.isFinite(v)) {
-            throw new IllegalArgumentException("GeoKey " + shownId + " (DOUBLE) absent ou invalide");
+            throw new IllegalArgumentException("GeoKey " + shownId + " (DOUBLE) missing or invalid");
         }
         return v;
     }
@@ -283,11 +282,11 @@ public final class Crs {
     private static void checkLatLon(double lat, double lon) {
         if (!(lat >= -90 && lat <= 90) || !(lon >= -540 && lon <= 540)) {
             throw new IllegalArgumentException(String.format(Locale.ROOT,
-                    "parametres angulaires hors bornes : lat=%s, lon=%s", lat, lon));
+                    "angular parameters out of range: lat=%s, lon=%s", lat, lon));
         }
     }
 
-    /** Adaptateur qui met a l'echelle metres les coordonnees du systeme source. */
+    /** Adapter that scales the source system's coordinates into metres. */
     private static final class Scaled implements Projection {
         private final Projection base;
         private final double toMetre;

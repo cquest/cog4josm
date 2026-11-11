@@ -27,12 +27,17 @@ d'arrière-plan, par lectures HTTP byte-ranges uniquement.
 
 ## Langue et style
 
-- **Commentaires de code et messages de commit en français sans accents**
-  (contrainte d'encodage historique du code : « arriere-plan », « ecriture »).
-  La documentation Markdown (README, ce fichier) peut garder les accents.
-  Identificateurs et API en anglais.
+- **Commentaires et messages du code source en ANGLAIS** (javadoc, commentaires
+  inline, messages d'exception, journaux). Les chaînes destinées à l'interface
+  JOSM (dialogues, info-bulles) sont en anglais **et enveloppées dans `tr()`** :
+  la version française provient de l'i18n JOSM, pas du code. Aucune lettre
+  accentuée ni signe non ASCII dans les sources (sauf « … » dans les chaînes
+  `tr()`, convention JOSM).
+- **Messages de commit en français sans accents.** La documentation Markdown
+  (README, ce fichier) est en français et peut garder les accents.
+- Identificateurs et API en anglais.
 - Imports en tête de fichier, sans import wildcard ; `Logging` de JOSM pour
-  toute journalisation, messages préfixés « josm-cog : ».
+  toute journalisation, messages préfixés « josm-cog: ».
 
 ## Construire / tester
 

@@ -70,7 +70,7 @@ class TileDecoderTest {
                 for (int x = 0; x < 16; x++) {
                     int v = img.getRaster().getSample(x, y, 0);
                     assertEquals(TestTiffWriter.pix(32 + x, 16 + y, 0, 8), v,
-                            "gris(" + x + "," + y + ")");
+                            "grey(" + x + "," + y + ")");
                 }
             }
         }
@@ -91,9 +91,9 @@ class TileDecoderTest {
     }
 
     /**
-     * Tuile JPEG ecrite par GDAL (COG driver) : pas de DQT dans le flux,
-     * tables de quantification dans la balise JPEGTables (347).
-     * Fixture extraite de cog-paris-3857.tif (gdalwarp -of COG -co COMPRESS=JPEG).
+     * JPEG tile written by GDAL (COG driver): no DQT in the stream,
+     * quantization tables in the JPEGTables tag (347).
+     * Fixture extracted from cog-paris-3857.tif (gdalwarp -of COG -co COMPRESS=JPEG).
      */
     @Test
     void jpegTileWithExternalTables() throws IOException {
@@ -112,7 +112,7 @@ class TileDecoderTest {
     private static byte[] readFile(String name) throws IOException {
         try (var in = TileDecoderTest.class.getClassLoader().getResourceAsStream(name)) {
             if (in == null) {
-                throw new IOException("fixture manquante : " + name);
+                throw new IOException("missing fixture: " + name);
             }
             return in.readAllBytes();
         }

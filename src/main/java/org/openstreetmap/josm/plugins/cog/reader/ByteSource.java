@@ -4,21 +4,20 @@ import java.io.Closeable;
 import java.io.IOException;
 
 /**
- * Source d'octets a acces aleatoire. Abstraction utilisee par le parseur TIFF
- * pour pouvoir lire indifferemment un COG distant (acces par byte-ranges) ou
- * un fichier local (tests).
+ * Random-access byte source. Abstraction used by the TIFF parser so that it can
+ * read either a remote COG (byte-range access) or a local file (tests).
  */
 public interface ByteSource extends Closeable {
 
-    /** Taille totale en octets. */
+    /** Total size in bytes. */
     long size() throws IOException;
 
-    /** Faux si la source ne sait pas repondre a des lectures partielles. */
+    /** False if the source cannot answer partial reads. */
     boolean supportsRanges();
 
     /**
-     * Lit {@code length} octets a partir de {@code offset} (peut renvoyer moins
-     * pres de la fin du fichier, jamais plus).
+     * Reads {@code length} bytes starting at {@code offset} (may return fewer
+     * bytes near the end of the file, never more).
      */
     byte[] read(long offset, int length) throws IOException;
 }

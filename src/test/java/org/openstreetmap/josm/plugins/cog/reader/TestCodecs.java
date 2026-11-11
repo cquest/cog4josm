@@ -5,7 +5,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.Deflater;
 
-/** Encodeurs TIFF (LZW EarlyChange=0, PackBits, deflate) pour les tests. */
+/** TIFF encoders (LZW EarlyChange=0, PackBits, deflate) for the tests. */
 final class TestCodecs {
 
     private TestCodecs() {
@@ -53,7 +53,7 @@ final class TestCodecs {
         return out.toByteArray();
     }
 
-    /** Encodeur LZW variante TIFF 6.0 (EarlyChange=0), coherent avec TileDecoder.lzwDecode. */
+    /** LZW encoder, TIFF 6.0 flavour (EarlyChange=0), consistent with TileDecoder.lzwDecode. */
     static byte[] lzwEncode(byte[] in) {
         BitOut out = new BitOut();
         Map<String, Integer> dict = new HashMap<>();
@@ -96,12 +96,12 @@ final class TestCodecs {
         }
         Integer c = dict.get(w);
         if (c == null) {
-            throw new IllegalStateException("chaine absente de la table LZW : " + w.length());
+            throw new IllegalStateException("string missing from the LZW table: " + w.length());
         }
         return c;
     }
 
-    /** Ecriture de codes MSB-first dans un flux d'octets. */
+    /** Writing of MSB-first codes into a byte stream. */
     static final class BitOut {
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         private int acc;

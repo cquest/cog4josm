@@ -14,9 +14,9 @@ import org.openstreetmap.josm.tools.Logging;
 import java.awt.image.BufferedImage;
 
 /**
- * Job de fabrication d'une tuile : convertit la tuile de la grille OSM en boite
- * dans le systeme de coordonnees du COG, puis laisse le {@link CogComposer} assembler
- * les tuiles sources necessaires (chargees par byte-ranges).
+ * Tile building job: converts a tile of the OSM grid into a box in the COG's
+ * coordinate reference system, then lets {@link CogComposer} assemble the
+ * source tiles required (fetched by byte-ranges).
  */
 final class CogTileLoaderJob implements TileJob {
 
@@ -53,7 +53,7 @@ final class CogTileLoaderJob implements TileJob {
         boolean success = false;
         try {
             if (!(tile.getSource() instanceof CogTileSource cts)) {
-                Logging.warn("josm-cog : source de tuile etrangere {0}",
+                Logging.warn("josm-cog: foreign tile source {0}",
                         tile.getSource() == null ? "null" : tile.getSource().getClass().getName());
                 return;
             }
@@ -73,7 +73,7 @@ final class CogTileLoaderJob implements TileJob {
                 if (proj == null) {
                     tile.finishLoading();
                     tile.setError(cts.getCrsError() == null
-                            ? info.crsDescription() + " non supporte" : cts.getCrsError());
+                            ? info.crsDescription() + " not supported" : cts.getCrsError());
                     loader.listener().tileLoadingFinished(tile, false);
                     return;
                 }
@@ -86,7 +86,7 @@ final class CogTileLoaderJob implements TileJob {
             tile.setLoaded(true);
             success = true;
         } catch (Exception e) {
-            Logging.warn("josm-cog : erreur tuile {0} : {1}", tile.getKey(), e);
+            Logging.warn("josm-cog: error on tile {0}: {1}", tile.getKey(), e);
             tile.finishLoading();
             tile.setError(e);
         }

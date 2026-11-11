@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CogComposerTest {
 
-    /** COG 64x48 px, pixel de 10 m, coin NW a (500000, 6250000), EPSG:3857. */
+    /** 64x48 px COG, 10 m pixel, NW corner at (500000, 6250000), EPSG:3857. */
     private static CogReader openCog() throws IOException {
         byte[] tiff = TestTiffWriter.write(List.of(
                 new TestTiffWriter.LevelSpec(64, 48, 8, 1, 8, false),
@@ -25,7 +25,7 @@ class CogComposerTest {
     @Test
     void composesFullResOneToOne() throws IOException {
         try (CogReader r = openCog()) {
-            // bbox 480x480 m au niveau 0 (res 10) => fenetre 48x48 px -> cible 48 px : 1:1
+            // 480x480 m bbox at level 0 (res 10) => 48x48 px window -> 48 px target: 1:1
             Bounds bbox = new Bounds(500160, 6249520, 500640, 6250000);
             BufferedImage img = CogComposer.compose(r, bbox, 48);
             assertNotNull(img);
@@ -47,7 +47,7 @@ class CogComposerTest {
     @Test
     void picksOverviewLevel() throws IOException {
         try (CogReader r = openCog()) {
-            // bbox 320x320 m, cible 16 px => resolution voulue 20 = niveau 1 exactement
+            // 320x320 m bbox, 16 px target => wanted resolution 20 = exactly level 1
             Bounds bbox = new Bounds(500000, 6249680, 500320, 6250000);
             BufferedImage img = CogComposer.compose(r, bbox, 16);
             assertNotNull(img);

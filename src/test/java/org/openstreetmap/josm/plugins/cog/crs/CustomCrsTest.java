@@ -10,22 +10,21 @@ import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
 import org.openstreetmap.josm.plugins.cog.reader.CustomCrs.Key;
 
 /**
- * Controle du mapping declaratif des GeoKeys "user-defined" (32767) vers les
- * projections du paquetage. References calculees avec GDAL/PROJ pour des
- * systemes definis par chaine PROJ.4 (custom_lcc / custom_tmerc de la
- * campagne de reference) : les parametres GeoKeys reproduisent ceux que
- * GDAL ecrit dans un GeoTIFF.
+ * Check of the declarative mapping from "user-defined" GeoKeys (32767) to the
+ * package's projections. References computed with GDAL/PROJ for systems
+ * defined by PROJ.4 strings (custom_lcc / custom_tmerc from the reference
+ * campaign): the GeoKeys parameters reproduce those GDAL writes in a GeoTIFF.
  */
 class CustomCrsTest {
 
-    /** References du LCC custom (GRS80, sp 44/49, lat0 46.5, lon0 3, FE 700000, FN 6600000). */
+    /** Custom LCC references (GRS80, sp 44/49, lat0 46.5, lon0 3, FE 700000, FN 6600000). */
     private static final double[][] LCC = {
         {3.0, 46.5, 700000.000, 6600000.000},
         {2.294, 48.858, 648200.220, 6862227.533},
         {3.5, 47.2, 737852.329, 6677865.314},
     };
 
-    /** References du TM custom Clarke 1880 (IGN) (lat0 48.85, lon0 2.35, k0 0.99986521). */
+    /** Custom TM Clarke 1880 (IGN) references (lat0 48.85, lon0 2.35, k0 0.99986521). */
     private static final double[][] TMERC = {
         {2.35, 48.85, 600000.000, 2200000.000},
         {2.5, 49.0, 610974.823, 2216689.855},
@@ -33,8 +32,8 @@ class CustomCrsTest {
     };
 
     /**
-     * Clefs LCC custom ; avec {@code ellipsoidDoubles=false}, les parametres
-     * d'ellipsoide 2057/2059 sont absents et seul le code 2056=7019 les remplace.
+     * Custom LCC keys; with {@code ellipsoidDoubles=false}, the
+     * 2057/2059 ellipsoid parameters are absent and only code 2056=7019 replaces them.
      */
     private static CustomCrs lccKeys(boolean ellipsoidDoubles) {
         double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
@@ -83,11 +82,11 @@ class CustomCrsTest {
             new Key(3074, 0, 1, 32767),
             new Key(3075, 0, 1, 1),
             new Key(3076, 0, 1, 9001),
-            new Key(3080, 34736, 1, 2), // longitude d'origine
-            new Key(3081, 34736, 1, 0), // latitude d'origine
-            new Key(3082, 34736, 1, 4), // fausse est
-            new Key(3083, 34736, 1, 5), // fausse nord
-            new Key(3092, 34736, 1, 3), // facteur d'echelle
+            new Key(3080, 34736, 1, 2), // origin longitude
+            new Key(3081, 34736, 1, 0), // origin latitude
+            new Key(3082, 34736, 1, 4), // false easting
+            new Key(3083, 34736, 1, 5), // false northing
+            new Key(3092, 34736, 1, 3), // scale factor
         };
         return new CustomCrs(keys, d, null);
     }
@@ -106,13 +105,13 @@ class CustomCrsTest {
         }
     }
 
-    /** Sans parametres DOUBLE 2057/2059, l'ellipsoide est trouve par son code 7019. */
+    /** Without 2057/2059 DOUBLE parameters, the ellipsoid is found by its code 7019. */
     @Test
     void customEllipsoidByCode() {
         CustomCrs c = lccKeys(false);
         Ellipsoid e = Ellipsoid.forGeoKeyCode(7019);
         assertSame(Ellipsoid.GRS80, e);
-        // projection identique a celle avec parametres explicites (mm pres)
+        // projection identical to the one with explicit parameters (mm apart)
         Projection a = Crs.fromCustom(lccKeys(false));
         Projection b = Crs.fromCustom(lccKeys(true));
         for (double[] cse : LCC) {
@@ -122,7 +121,7 @@ class CustomCrsTest {
         }
     }
 
-    /** Le LCC custom aux parametres de Lambert-93 doit coincider avec EPSG:2154. */
+    /** The custom LCC with Lambert-93 parameters must match EPSG:2154. */
     @Test
     void customLccEqualsRegisteredLambert93() {
         Projection custom = Crs.fromCustom(lccKeys(true));
@@ -149,7 +148,7 @@ class CustomCrsTest {
         }
     }
 
-    /** Systeme geographique custom avec meridien principal a 2.5 degres. */
+    /** Custom geographic system with prime meridian at 2.5 degrees. */
     @Test
     void customGeographicWithPrimeMeridian() {
         Key[] keys = {
@@ -170,7 +169,7 @@ class CustomCrsTest {
         assertEquals(3.0, ll[1], 1e-12);
     }
 
-    /** Systeme geographique custom en degres sans meridien special : voie lineaire OK. */
+    /** Custom geographic system in degrees without special meridian: linear path OK. */
     @Test
     void customGeographicGreenwich() {
         Key[] keys = {
@@ -183,7 +182,7 @@ class CustomCrsTest {
         assertTrue(((Geographic) p).isPrimeMeridianZero());
     }
 
-    /** Lambert 1SP (3074=9) : traite comme 2SP a paralleles confondus, k0 explicite. */
+    /** Lambert 1SP (3074=9): treated as 2SP with coincident parallels, explicit k0. */
     @Test
     void customLambert1sp() {
         double[] d = {45.0, 5.0, 1000000.0, 2000000.0, 6378137.0, 298.257223563, 0.99987731};
@@ -200,18 +199,18 @@ class CustomCrsTest {
             new Key(3092, 34736, 1, 6), // k0
         };
         Projection p = Crs.fromCustom(new CustomCrs(keys, d, null));
-        // le projet central (lat0, lon0) tombe exactement sur (FE, FN) par construction
+        // the central projected point (lat0, lon0) lands exactly on (FE, FN) by construction
         double[] xy = p.project(45.0, 5.0);
-        assertEquals(1000000.0, xy[0], 1e-6, "lat0/lon0 -> FE/FN exacts");
+        assertEquals(1000000.0, xy[0], 1e-6, "exact FE/FN for lat0/lon0");
         assertEquals(2000000.0, xy[1], 1e-6);
         double[] ll = p.unproject(1000000.0, 2000000.0);
         assertEquals(45.0, ll[0], 1e-9);
         assertEquals(5.0, ll[1], 1e-9);
-        // coherence locale : un point au nord tombe au nord (y croissant)
+        // local consistency: a point to the north lands to the north (increasing y)
         double[] xy2 = p.project(46.0, 5.0);
         assertTrue(xy2[1] > xy[1]);
         assertEquals(1000000.0, xy2[0], 1e-6);
-        // contre-reference GDAL : (45N, 6E) -> (1078835.160, 2000486.472)
+        // GDAL cross-reference: (45N, 6E) -> (1078835.160, 2000486.472)
         double[] xy3 = p.project(45.0, 6.0);
         assertEquals(1078835.160, xy3[0], 0.05);
         assertEquals(2000486.472, xy3[1], 0.05);
@@ -236,11 +235,11 @@ class CustomCrsTest {
             new Key(2056, 0, 1, 7031),
             new Key(3072, 0, 1, 32767),
             new Key(3074, 0, 1, 32767),
-            new Key(3075, 0, 1, 6), // Albers : non supporte
+            new Key(3075, 0, 1, 6), // Albers: unsupported
         };
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> Crs.fromCustom(new CustomCrs(keys, new double[0], null)));
-        assertTrue(e.getMessage().contains("non supporte"));
+        assertTrue(e.getMessage().contains("unsupported"));
     }
 
     @Test
@@ -267,7 +266,7 @@ class CustomCrsTest {
                 () -> Crs.fromCustom(new CustomCrs(keys, new double[0], null)));
     }
 
-    /** Unites lineaires non metres : les coordonnees modeles sont mises a l'echelle. */
+    /** Non-metre linear units: the model coordinates are scaled. */
     @Test
     void linearUnitsScaled() {        double[] d = {46.5, 3.0, 44.0, 49.0, 700000.0, 6600000.0, 298.257222101, 6378137.0, 0.0};
         Key[] keys = {
@@ -276,7 +275,7 @@ class CustomCrsTest {
             new Key(3072, 0, 1, 32767),
             new Key(3074, 0, 1, 32767),
             new Key(3075, 0, 1, 8),
-            new Key(3076, 0, 1, 9002), // pied international
+            new Key(3076, 0, 1, 9002), // international foot
             new Key(3078, 34736, 1, 2),
             new Key(3079, 34736, 1, 3),
             new Key(3084, 34736, 1, 1),
@@ -286,29 +285,29 @@ class CustomCrsTest {
         };
         Projection p = Crs.fromCustom(new CustomCrs(keys, d, null));
         double[] xy = p.project(46.5, 3.0);
-        assertEquals(700000.0 / 0.3048, xy[0], 1e-3, "pieds attendus");
+        assertEquals(700000.0 / 0.3048, xy[0], 1e-3, "feet expected");
         assertEquals(6600000.0 / 0.3048, xy[1], 1e-3);
     }
 
     /**
-     * Clefs « hybrides » a la PIX4Dmatic : 3072 porte un code enregistre
-     * (EPSG:3943, Lambert-43 / CC43) mais 3074=32767 garantit la presence de
-     * tous les parametres de methode en DOUBLE. References GDAL (osgeo,
-     * ImportFromEPSG 3943) : le systeme decrit est exactement CC43.
+     * PIX4Dmatic-style "hybrid" keys: 3072 carries a registered code
+     * (EPSG:3943, Lambert-43 / CC43) but 3074=32767 guarantees that all the
+     * method parameters are present as DOUBLE. GDAL references (osgeo,
+     * ImportFromEPSG 3943): the described system is exactly CC43.
      */
     private static CustomCrs cc43Keys() {
         double[] d = {43.0, 3.0, 42.25, 43.75, 1700000.0, 2200000.0,
                 298.257222101, 6378137.0, 0.0};
         Key[] keys = {
             new Key(1024, 0, 1, 1),
-            new Key(2048, 0, 1, 4171),  // RGF93 enregistre
+            new Key(2048, 0, 1, 4171),  // registered RGF93
             new Key(2054, 0, 1, 9102),
             new Key(2056, 0, 1, 7019),  // GRS80
             new Key(2057, 34736, 1, 7),
             new Key(2059, 34736, 1, 6),
             new Key(2061, 34736, 1, 8),
-            new Key(3072, 0, 1, 3943),  // code enregistre (hybride)
-            new Key(3074, 0, 1, 32767), // methode user-defined : parametres presents
+            new Key(3072, 0, 1, 3943),  // registered code (hybrid)
+            new Key(3074, 0, 1, 32767), // user-defined method: parameters present
             new Key(3075, 0, 1, 8),
             new Key(3076, 0, 1, 9001),
             new Key(3078, 34736, 1, 2),
@@ -340,32 +339,32 @@ class CustomCrsTest {
         }
     }
 
-    /** Code enregistre SANS 3074=32767 : pas de parametres, clefs jugees incoherentes. */
+    /** Registered code WITHOUT 3074=32767: no parameters, keys judged inconsistent. */
     @Test
     void registeredCodeWithoutCustomTransRejected() {
         Key[] keys = {
             new Key(1024, 0, 1, 1),
             new Key(2048, 0, 1, 4171),
-            new Key(3072, 0, 1, 2154), // code Lambert-93 sans methode user-defined
+            new Key(3072, 0, 1, 2154), // Lambert-93 code without user-defined method
         };
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> Crs.fromCustom(new CustomCrs(keys, new double[0], null)));
-        assertTrue(e.getMessage().contains("enregistree"));
+        assertTrue(e.getMessage().contains("registered"));
     }
 
-    /** Crs.resolve : registre d'abord, repli sur les parametres GeoKeys sinon. */
+    /** Crs.resolve: registry first, fall back to the GeoKeys parameters otherwise. */
     @Test
     void resolvePrefersRegistryThenParams() {
-        // code au registre : c'est lui qui gagne, les parametres sont ignores
+        // code in the registry: it wins, the parameters are ignored
         Projection l93 = Crs.resolve(2154, cc43Keys());
         assertSame(Crs.forEpsg(2154), l93);
-        // code absent du registre mais parametres presents : repli custom
+        // code absent from the registry but parameters present: custom fallback
         Projection cc43 = Crs.resolve(3943, cc43Keys());
         assertTrue(cc43 instanceof LambertConformalConic2SP);
         double[] xy = cc43.project(43.0, 3.0);
         assertEquals(1700000.0, xy[0], 1e-6);
         assertEquals(2200000.0, xy[1], 1e-6);
-        // ni code connu ni parametres : null (message porte par fromCustom)
+        // neither a known code nor parameters: null (message carried by fromCustom)
         org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(3943, null));
         org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(0, null));
     }

@@ -1,8 +1,8 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 /**
- * Boite englobante rectangulaire dans le systeme de projection du COG
- * (metres pour un 3857, degres pour un 4326).
+ * Rectangular bounding box in the projection system of the COG
+ * (metres for 3857, degrees for 4326).
  */
 public record Bounds(double minX, double minY, double maxX, double maxY) {
 

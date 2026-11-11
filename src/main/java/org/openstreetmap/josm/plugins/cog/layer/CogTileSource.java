@@ -22,9 +22,9 @@ import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 
 /**
- * Source de tuiles "COG" : grille web-mercatator standard (identique TMS/OSM),
- * mais sans URL de tuile — les images sont synthetisees a la volee par
- * {@link CogTileLoaderJob} depuis le COG.
+ * "COG" tile source: standard Web Mercator grid (identical to TMS/OSM), but
+ * with no tile URL: images are synthesized on the fly by
+ * {@link CogTileLoaderJob} from the COG.
  */
 public class CogTileSource extends AbstractTMSTileSource {
 
@@ -35,9 +35,9 @@ public class CogTileSource extends AbstractTMSTileSource {
     private final OsmMercator mercator;
     private final int minZoom;
     private final int maxZoom;
-    /** Projection du COG (resolue a la demande, null pour 3857/4326 en voie lineaire). */
+    /** COG projection (resolved on demand, null for 3857/4326 on the linear path). */
     private volatile Projection projection;
-    /** Message d'erreur si le systeme custom du COG n'a pu etre resolu (null sinon). */
+    /** Error message when the COG's custom system could not be resolved (null otherwise). */
     private volatile String crsError;
 
     public CogTileSource(ImageryInfo info, CogReader reader) {
@@ -49,9 +49,9 @@ public class CogTileSource extends AbstractTMSTileSource {
         this.minZoom = 0;
         this.maxZoom = MAX_ZOOM;
         if (cogInfo.crsCode != 3857 && cogInfo.crsCode != 4326) {
-            // resout des l'ouverture le systeme du COG : code EPSG enregistre
-            // connu du registre, sinon GeoKeys "user-defined" (32767, ou code
-            // non repertorie accompagne de ses parametres explicites)
+            // resolve the COG's system as soon as the file is opened: a registered
+            // EPSG code known to the registry, otherwise the "user-defined" GeoKeys
+            // (32767, or an unlisted code accompanied by its explicit parameters)
             projection = Crs.resolve(cogInfo.crsCode, cogInfo.customCrs);
             if (projection == null) {
                 crsError = crsErrorReason();
@@ -59,44 +59,44 @@ public class CogTileSource extends AbstractTMSTileSource {
         }
     }
 
-    /** Motif d'echec de resolution du systeme (pour message d'erreur). */
+    /** Reason why resolving the system failed (for the error message). */
     private String crsErrorReason() {
         if (cogInfo.customCrs != null) {
             try {
                 Crs.fromCustom(cogInfo.customCrs);
-                return "EPSG:" + cogInfo.crsCode + " non supporte";
+                return "EPSG:" + cogInfo.crsCode + " not supported";
             } catch (IllegalArgumentException e) {
                 String prefix = cogInfo.crsCode == 0 || cogInfo.crsCode == CustomCrs.USER_DEFINED
-                        ? "" : "EPSG:" + cogInfo.crsCode + " non supporte, repli sur parametres GeoKeys echoue : ";
+                        ? "" : "EPSG:" + cogInfo.crsCode + " not supported, fallback on GeoKeys parameters failed: ";
                 return prefix + e.getMessage();
             }
         }
-        return cogInfo.crsCode == 0 ? "systeme de reference absent" : "EPSG:" + cogInfo.crsCode + " non supporte";
+        return cogInfo.crsCode == 0 ? "missing coordinate reference system" : "EPSG:" + cogInfo.crsCode + " not supported";
     }
 
     public CogInfo getCogInfo() {
         return cogInfo;
     }
 
-    /** Lecteur COG attache a cette source (utilisé par CogTileLoaderJob). */
+    /** COG reader attached to this source (used by CogTileLoaderJob). */
     public CogReader getReader() {
         return reader;
     }
 
     /**
-     * Projection du systeme de reference du COG (code EPSG ou GeoKeys custom),
-     * ou null si le systeme est absent ou non supporte (voir {@link #getCrsError()}).
+     * Projection of the COG's coordinate reference system (EPSG code or custom GeoKeys),
+     * or null when the system is missing or not supported (see {@link #getCrsError()}).
      */
     public Projection getProjection() {
         return projection;
     }
 
-    /** Reason pour lequel la projection est absente (null si le COG est exploitable). */
+    /** Reason why the projection is missing (null when the COG is usable). */
     public String getCrsError() {
         return crsError;
     }
 
-    /** Vrai si les coordonnees modeles sont des degres (EPSG:4326 ou geographique custom PM=0). */
+    /** True when the model coordinates are degrees (EPSG:4326 or custom geographic with PM=0). */
     public boolean isGeographicDegrees() {
         return cogInfo.crsCode == 4326
                 || (projection instanceof Geographic g && g.epsg() == 0 && g.isPrimeMeridianZero());
@@ -112,7 +112,7 @@ public class CogTileSource extends AbstractTMSTileSource {
         return maxZoom;
     }
 
-    /** URL symbolique : aucune tuile n'est telechargee par URL. */
+    /** Symbolic URL: no tile is ever downloaded by URL. */
     @Override
     public String getTileUrl(int zoom, int x, int y) {
         return "cog://" + getId() + "/" + zoom + "/" + x + "/" + y;
@@ -186,7 +186,7 @@ public class CogTileSource extends AbstractTMSTileSource {
         return new TileXY(xf, yf);
     }
 
-    // ------------------------------------------------------------ tuiles
+    // ------------------------------------------------------------ tiles
 
     @Override
     public int getTileXMin(int zoom) {
@@ -236,7 +236,7 @@ public class CogTileSource extends AbstractTMSTileSource {
 
     @Override
     public String toString() {
-        return String.format(Locale.ROOT, "CogTileSource[%s, %d niveaux, %s]",
+        return String.format(Locale.ROOT, "CogTileSource[%s, %d levels, %s]",
                 getId(), cogInfo.levelCount(), cogInfo.crsDescription());
     }
 }

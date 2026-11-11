@@ -17,8 +17,8 @@ import org.openstreetmap.josm.tools.Logging;
 import static org.openstreetmap.josm.tools.I18n.tr;
 
 /**
- * Demande une URL de COG, verifie qu'elle est lisible par byte-ranges et
- * ajoute la couche d'arriere-plan correspondante.
+ * Asks for a COG URL, checks it is readable through byte-ranges and adds the
+ * matching background layer.
  */
 public class AddCogLayerAction extends JosmAction {
 
@@ -47,38 +47,39 @@ public class AddCogLayerAction extends JosmAction {
             if (proj == null) {
                 String why;
                 if (org.openstreetmap.josm.plugins.cog.crs.Crs.isSupported(info.crsCode)) {
-                    why = "projection supportede mais resolution echouee";
+                    why = tr("supported projection but resolution failed");
                 } else if (info.customCrs != null && info.crsCode != 0
                         && info.crsCode != org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED) {
-                    why = "EPSG:" + info.crsCode + " inconnu du registre, repli sur ses parametres GeoKeys echoue : "
+                    why = tr("Unknown EPSG:") + " " + info.crsCode + " "
+                            + tr("to the registry, and its GeoKeys parameters fallback failed: ")
                             + tryCustom(info);
                 } else {
                     why = info.crsCode == 0
                             || info.crsCode == org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED
                             ? tryCustom(info)
-                            : "EPSG:" + info.crsCode + " inconnu du registre";
+                            : tr("Unknown EPSG:") + " " + info.crsCode;
                 }
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                        tr("Systeme de reference du COG non supporte") + " (" + info.crsDescription() + ").\n"
-                                + "Raison : " + why + "\n\n"
-                                + tr("Systemes pris en charge : EPSG:4326, EPSG:3857, "
-                                        + "fuseaux UTM WGS84 (32601-32660, 32701-32760), EPSG:2154 (Lambert-93), "
-                                        + "et systemes GeoTIFF « user-defined » a parametres explicites "
-                                        + "(geographique, transverse de Mercator, conique conforme de Lambert)."),
+                        tr("Unsupported coordinate reference system for this COG") + " (" + info.crsDescription() + ").\n"
+                                + tr("Reason: ") + why + "\n\n"
+                                + tr("Supported systems: EPSG:4326, EPSG:3857, "
+                                        + "WGS84 UTM zones (32601-32660, 32701-32760), EPSG:2154 (Lambert-93), "
+                                        + "and GeoTIFF \"user-defined\" systems with explicit parameters "
+                                        + "(geographic, transverse Mercator, Lambert conformal conic)."),
                         tr("Unsupported projection"), JOptionPane.WARNING_MESSAGE);
                 reader.close();
                 return;
             }
             String fileName = url.substring(url.lastIndexOf('/') + 1);
             String name = "COG " + (fileName.isEmpty() ? url : fileName);
-            // type d'imagerie par defaut : la couche est construite directement
-            // par le plugin, le type n'est pas utilise par JOSM ici.
+            // default imagery type: the layer is built by the plugin itself,
+            // JOSM does not use the type here.
             ImageryInfo imageryInfo = new ImageryInfo(name, url);
-            imageryInfo.setAttributionText(tr("COG : ") + url);
+            imageryInfo.setAttributionText(tr("COG: ") + url);
             CogImageryLayer layer = new CogImageryLayer(imageryInfo, reader);
             MainApplication.getLayerManager().addLayer(layer);
-            // differe le zoom : le cadre de carte peut etre en cours de creation
-            // (taille nulle) juste apres addLayer.
+            // zoom is deferred: the map frame may still be under construction
+            // (zero size) right after addLayer.
             final org.openstreetmap.josm.data.Bounds zoomBounds = latLonBounds(info, proj);
             javax.swing.Timer zoomTimer = new javax.swing.Timer(700, e2 -> {
                 if (MainApplication.getMap() != null) {
@@ -87,9 +88,9 @@ public class AddCogLayerAction extends JosmAction {
             });
             zoomTimer.setRepeats(false);
             zoomTimer.start();
-            Logging.info("josm-cog : couche ajoutee pour {0} ({1} niveaux)", url, info.levelCount());
+            Logging.info("josm-cog: layer added for {0} ({1} levels)", url, info.levelCount());
         } catch (IOException | IllegalArgumentException ex) {
-            Logging.warn("josm-cog : ouverture refusee pour {0}", url);
+            Logging.warn("josm-cog: refused opening for {0}", url);
             Logging.warn(ex);
             if (reader != null) {
                 try {
@@ -99,38 +100,38 @@ public class AddCogLayerAction extends JosmAction {
                 }
             }
             JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
-                    tr("Cannot open this COG :") + "\n" + ex.getMessage(),
+                    tr("Cannot open this COG:") + "\n" + ex.getMessage(),
                     tr("Error"), JOptionPane.ERROR_MESSAGE);
         }
     }
 
     /**
-     * Projection du systeme de reference declare par le COG (code EPSG
-     * enregistre connu du registre, sinon GeoKeys "user-defined" 32767 ou
-     * parametres explicites joints a un code non repertorie), null si non
-     * resolvable.
+     * Projection of the coordinate reference system declared by the COG
+     * (registered EPSG code known to the registry, otherwise "user-defined"
+     * GeoKeys 32767 or explicit parameters attached to an unlisted code),
+     * null when unresolvable.
      */
     static org.openstreetmap.josm.plugins.cog.crs.Projection resolveProjection(CogInfo info) {
         return org.openstreetmap.josm.plugins.cog.crs.Crs.resolve(info.crsCode, info.customCrs);
     }
 
-    /** Motif d'echec de resolution du systeme custom (pour le message d'erreur). */
+    /** Failure reason of the custom system resolution (for the error message). */
     private static String tryCustom(CogInfo info) {
         if (info.customCrs == null) {
-            return "aucun GeoKey de systeme de reference exploitable";
+            return tr("no usable coordinate reference system GeoKey");
         }
         try {
             org.openstreetmap.josm.plugins.cog.crs.Crs.fromCustom(info.customCrs);
-            return "resolu au second essai (incoherent)";
+            return tr("resolved on second attempt (inconsistent)");
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         }
     }
 
     /**
-     * Emprise geographique (lat/lon) du COG : la boite de ses coordonnees modeles
-     * est echantillonnee (coins + milieux des bords) puis deprojetee, ce qui suit
-     * la courbure des meridien/paralleles pour les systemes projetes.
+     * Geographic (lat/lon) extent of the COG: its model-coordinate box is
+     * sampled (corners + edge midpoints) then unprojected, which follows the
+     * curvature of meridians/parallels for projected systems.
      */
     static org.openstreetmap.josm.data.Bounds latLonBounds(CogInfo info) {
         return latLonBounds(info, resolveProjection(info));

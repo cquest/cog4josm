@@ -4,19 +4,19 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
-/** Ellipsoide de reference (demi-grand axe a, aplatissement inverse 1/f). */
+/** Reference ellipsoid (semi-major axis a, inverse flattening 1/f). */
 public final class Ellipsoid {
 
     private static final Map<String, Ellipsoid> CACHE = new HashMap<>();
 
     public static final Ellipsoid WGS84 = register("WGS84", 6378137.0, 298.257223563);
-    /** GRS80 : identique a WGS84 au millimetre pres (RGF97 / ETRS89). */
+    /** GRS80: identical to WGS84 to within a millimetre (RGF97 / ETRS89). */
     public static final Ellipsoid GRS80 = register("GRS80", 6378137.0, 298.257222101);
 
     /**
-     * Ellipsoides nommes des codes GeoTIFF (GeogGeodeticDatum 6xxx et
-     * GeogEllipsoid 7xxx, table libgeotiff). Un code absent de cette table est
-     * refuse : le fichier doit fournir a et 1/f (GeoGeoSemanticSize 2057/2059).
+     * Named ellipsoids behind the GeoTIFF codes (GeogGeodeticDatum 6xxx and
+     * GeogEllipsoid 7xxx, libgeotiff table). A code missing from this table is
+     * rejected: the file must provide a and 1/f (GeoGeoSemanticSize 2057/2059).
      */
     private static final Map<Integer, double[]> GEOKEY_CODES = new HashMap<>();
     static {
@@ -53,11 +53,11 @@ public final class Ellipsoid {
         putCode(6011, 6378137.0, 298.257223563); // NAVDEV 87
         putCode(6022, 6378137.0, 298.257223563); // WGS 72
         putCode(6008, 6378145.0, 298.25);        // TS Old Harness
-        // ellipsoides 7xxx
+        // ellipsoids 7xxx
         putCode(7030, 6378137.0, 298.257223563); // WGS 84
-        putCode(7031, 6378137.0, 298.257223563); // WGS 84 (aux code 6326 pres)
+        putCode(7031, 6378137.0, 298.257223563); // WGS 84 (same as code 6326)
         putCode(7019, 6378137.0, 298.257222101); // GRS 1980
-        putCode(7035, 6378137.0, 298.257222101); // GRS 1980 (aux code 6255 pres)
+        putCode(7035, 6378137.0, 298.257222101); // GRS 1980 (same as code 6255)
         putCode(7004, 6378206.4, 294.9747461);   // Clarke 1866
         putCode(7015, 6378249.145, 293.4663);    // Clarke 1880 (variable)
         putCode(7006, 6378249.145, 293.4663);    // Clarke 1880 (Intl)
@@ -82,19 +82,19 @@ public final class Ellipsoid {
         GEOKEY_CODES.put(code, new double[]{a, rf});
     }
 
-    /** Ellipsoide pour un code GeoTIFF 6xxx/7xxx, ou null si code inconnu. */
+    /** Ellipsoid for a GeoTIFF 6xxx/7xxx code, or null when the code is unknown. */
     public static synchronized Ellipsoid forGeoKeyCode(int code) {
         double[] p = GEOKEY_CODES.get(code);
         return p == null ? null : of(p[0], p[1]);
     }
 
     /**
-     * Ellipsoide custom definis par ses parametres (a en metres, 1/f).
-     * Un aplatissement nul (1/f = 0, sphere exacte) est accepte.
+     * Custom ellipsoid defined by its parameters (a in metres, 1/f).
+     * A zero flattening (1/f = 0, perfect sphere) is accepted.
      */
     public static synchronized Ellipsoid of(double a, double invFlattening) {
         if (!(a > 0) || invFlattening < 0) {
-            throw new IllegalArgumentException("parametres d'ellipsoide invalides : a="
+            throw new IllegalArgumentException("invalid ellipsoid parameters: a="
                     + a + ", 1/f=" + invFlattening);
         }
         Ellipsoid e = CACHE.get(key(a, invFlattening));
@@ -119,9 +119,9 @@ public final class Ellipsoid {
     public final double semiMajorAxis;
     public final double inverseFlattening;
     public final double flattening;
-    /** Carre de la premiere excentricite e^2 = f(2-f). */
+    /** Square of the first eccentricity e^2 = f(2-f). */
     public final double e2;
-    /** Carre de la seconde excentricite e'^2 = e^2/(1-e^2). */
+    /** Square of the second eccentricity e'^2 = e^2/(1-e^2). */
     public final double ep2;
     public final double e;
 
