@@ -21,7 +21,8 @@ layers, using HTTP byte-range reads only.
   existing files).
 - V1 accepts only **EPSG:3857 and EPSG:4326**. Since phase 2, per-tile
   reprojection is enabled for the CRSs listed in `crs/Crs` (4326, 3857, WGS84
-  UTM 32601-32660 / 32701-32760, Lambert-93 2154); since phase 2.1 also
+  UTM 32601-32660 / 32701-32760, Lambert-93 2154 and its conformity zones
+  3942-3950); since phase 2.1 also
   **custom GeoKeys (32767)** whose parameters describe a known model
   (geographic, Transverse Mercator, Lambert conformal conic 1SP/2SP — see
   `Crs.fromCustom`); since phase 2.2 also a verified subset of other models

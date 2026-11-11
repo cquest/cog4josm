@@ -62,6 +62,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | 32601–32660 | UTM WGS84 nord (zone N) |
 | 32701–32760 | UTM WGS84 sud (zone N) |
 | 2154 | RGF97 / Lambert-93 (France métropolitaine) |
+| 3942–3950 | RGF97 / Lambert-93 zones de conformité CC42-CC50 |
 
 En plus des SRID EPSG enregistrés, le plugin comprend les GeoKeys
 « custom » (valeur 32767, ce que GDAL écrit pour tout système décrit par
@@ -80,9 +81,9 @@ ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 | — | Systématique (géographique), ellipsoïde + premier méridien |
 
 Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
-GeoKeys** (cas des exports PIX4Dmatic vers Lambert-43/EPSG:3943, par
-exemple) est reconnu par le même mécanisme : le plugin retombe sur les
-paramètres déclarés.
+GeoKeys** (cas des exports PIX4Dmatic, qui associent un code non listé à
+3074=32767 et au jeu complet de paramètres) est reconnu par le même
+mécanisme : le plugin retombe sur les paramètres déclarés.
 
 Toute autre méthode (conique équidistante 13, Mercator avec parallèle
 étalon 7, polyconique 22, orthographique 21, Mercator oblique général),

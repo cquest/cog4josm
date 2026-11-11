@@ -61,6 +61,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | 32601–32660 | UTM WGS84 north (zone N) |
 | 32701–32760 | UTM WGS84 south (zone N) |
 | 2154 | RGF97 / Lambert-93 (metropolitan France) |
+| 3942–3950 | RGF97 / Lambert-93 conformity zones CC42-CC50 |
 
 Besides the registered EPSG SRIDs, the plugin understands "custom" GeoKeys
 (value 32767, what GDAL writes for any system described by its parameters)
@@ -79,9 +80,9 @@ when they match a known model:
 | — | Geodetic (geographic), ellipsoid + prime meridian |
 
 An EPSG code not listed above but **accompanied by its GeoKeys parameters**
-(case of PIX4Dmatic exports to Lambert-43/EPSG:3943, for instance) is
-recognized by the same mechanism: the plugin falls back on the declared
-parameters.
+(case of PIX4Dmatic exports, which pair an unlisted code with 3074=32767
+and the full parameter set) is recognized by the same mechanism: the
+plugin falls back on the declared parameters.
 
 Any other method (equidistant conic 13, Mercator with standard parallel 7,
 polyconic 22, orthographic 21, general oblique Mercator), a sphere

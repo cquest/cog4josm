@@ -129,7 +129,8 @@ class TiffParserTest {
     void readsHybridRegisteredCodeWithGeoKeysParams() throws IOException {
         // PIX4Dmatic case: registered EPSG code (3943) BUT method declared as
         // "user-defined" (3074=32767) with full DOUBLE parameters ->
-        // customCrs must be kept (Crs.resolve falls back to it if the code is unknown)
+        // customCrs must be kept (Crs.resolve falls back to it when the code
+        // is not in the registry; for a known code the registry wins)
         double[] d = new double[9];
         int[] keys = TestTiffWriter.customKeysLcc(d, 3943, 4171);
         byte[] tiff = TestTiffWriter.write(List.of(

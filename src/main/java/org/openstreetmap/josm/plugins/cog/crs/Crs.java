@@ -11,7 +11,8 @@ import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
  * <ul>
  *   <li>EPSG:4326 (WGS84 geographic) and EPSG:3857 (Web Mercator);</li>
  *   <li>WGS84 UTM: north zones 32601-32660, south zones 32701-32760;</li>
- *   <li>EPSG:2154 (RGF97 / Lambert-93, metropolitan France);</li>
+ *   <li>EPSG:2154 (RGF97 / Lambert-93, metropolitan France) and its
+ *       conformity zones EPSG:3942-3950 (CC42-CC50);</li>
  *   <li>GeoTIFF GeoKey "user-defined" systems (codes 32767) when their
  *       parameters match a known model: geographic, transverse Mercator or
  *       Lambert conformal conic (phase 2.1, see {@link #fromCustom}).</li>
@@ -47,10 +48,9 @@ public final class Crs {
     /**
      * Projection declared by a COG: registered EPSG code when the registry
      * knows it, otherwise fallback on the "user-defined" GeoKeys parameters
-     * (3074=32767) that some writers attach to an unlisted code (e.g.
-     * PIX4Dmatic exports to Lambert-43/EPSG:3943). Null when no system can be
-     * resolved; the fallback failure reason is obtained by calling
-     * {@link #fromCustom} again (IllegalArgumentException).
+     * (3074=32767) that some writers attach to an unlisted code. Null when
+     * no system can be resolved; the fallback failure reason is obtained by
+     * calling {@link #fromCustom} again (IllegalArgumentException).
      */
     public static Projection resolve(int crsCode, CustomCrs custom) {
         if (crsCode != 0 && crsCode != CustomCrs.USER_DEFINED) {
@@ -86,6 +86,17 @@ public final class Crs {
             // RGF97 (GRS80) / Lambert-93
             return new LambertConformalConic2SP(2154, Ellipsoid.GRS80,
                     44.0, 49.0, 46.5, 3.0, 700000.0, 6600000.0);
+        }
+        if (epsg >= 3942 && epsg <= 3950) {
+            // RGF97 (GRS80) / Lambert-93 zones CC42-CC50: zone z = epsg - 3900
+            // has lat_0 = z, lat_1 = z - 0.75, lat_2 = z + 0.75, lon_0 = 3,
+            // x_0 = 1 700 000, y_0 = (z - 41) * 1 000 000 + 200 000
+            // (CC42 1 200 000, CC43 2 200 000, ... CC50 9 200 000; gdalsrsinfo
+            // parameters, origins verified per zone against gdaltransform)
+            double z = epsg - 3900.0;
+            return new LambertConformalConic2SP(epsg, Ellipsoid.GRS80,
+                    z - 0.75, z + 0.75, z, 3.0, 1700000.0,
+                    (z - 41.0) * 1000000.0 + 200000.0);
         }
         return null;
     }

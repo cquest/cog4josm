@@ -41,6 +41,28 @@ class ProjectionTest {
         {3.0, 46.5, 700000.000, 6600000.000},
     };
 
+    /** EPSG:3942-3950 anchors (RGF97 / Lambert-93 zones CC42-CC50, gdaltransform). */
+    private static final double[][] LAMBERT93_ZONES = {
+        {1.5, 42.5, 1576713.6510, 1256614.9390},
+        {4.5, 42.5, 1823286.3490, 1256614.9390},
+        {1.5, 43.5, 1578697.1976, 2256627.7312},
+        {4.5, 43.5, 1821302.8024, 2256627.7312},
+        {1.5, 44.5, 1580717.9076, 3256639.2164},
+        {4.5, 44.5, 1819282.0924, 3256639.2164},
+        {1.5, 45.5, 1582775.1785, 4256649.3803},
+        {4.5, 45.5, 1817224.8215, 4256649.3803},
+        {1.5, 46.5, 1584868.3959, 5256658.2104},
+        {4.5, 46.5, 1815131.6041, 5256658.2104},
+        {1.5, 47.5, 1586996.9338, 6256665.6956},
+        {4.5, 47.5, 1813003.0662, 6256665.6956},
+        {1.5, 48.5, 1589160.1547, 7256671.8266},
+        {4.5, 48.5, 1810839.8453, 7256671.8266},
+        {1.5, 49.5, 1591357.4101, 8256676.5957},
+        {4.5, 49.5, 1808642.5899, 8256676.5957},
+        {1.5, 50.5, 1593588.0401, 9256679.9968},
+        {4.5, 50.5, 1806411.9599, 9256679.9968},
+    };
+
     private static void check(String what, Projection p, double[][] cases, double tol, double tolInv) {
         for (double[] c : cases) {
             double[] xy = p.project(c[1], c[0]);
@@ -74,6 +96,23 @@ class ProjectionTest {
         check("Lambert93", Crs.forEpsg(2154), LAMBERT93, 0.001);
     }
 
+    /**
+     * Each zone CC42-CC50 (EPSG:3942-3950) is checked with its two anchors in
+     * LAMBERT93_ZONES: rows 2*(z-42) and 2*(z-42)+1.
+     */
+    @Test
+    void lambert93zones() {
+        for (int epsg = 3942; epsg <= 3950; epsg++) {
+            int z = epsg - 3900;
+            double[][] anchors = {
+                {3.0, z, 1700000.0, (z - 41.0) * 1000000.0 + 200000.0}, // origin, gdaltransform exact
+                LAMBERT93_ZONES[2 * (z - 42)],
+                LAMBERT93_ZONES[2 * (z - 42) + 1],
+            };
+            check("Lambert93 CC" + z, Crs.forEpsg(epsg), anchors, 0.001);
+        }
+    }
+
     /** EPSG:3857 references (Web Mercator, sphere a=6378137). */
     @Test
     void webMercator() {
@@ -95,6 +134,10 @@ class ProjectionTest {
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(4326 + 1));
         org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(4326));
         org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(2154));
+        org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(3942));
+        org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(3950));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3942 - 1));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3950 + 1));
         org.junit.jupiter.api.Assertions.assertFalse(Crs.isSupported(3035));
         double[] ll = Crs.forEpsg(4326).unproject(2.35, 48.85);
         org.junit.jupiter.api.Assertions.assertEquals(48.85, ll[0], 0.0);

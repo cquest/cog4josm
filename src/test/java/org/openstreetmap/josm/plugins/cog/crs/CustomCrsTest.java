@@ -358,14 +358,16 @@ class CustomCrsTest {
         // code in the registry: it wins, the parameters are ignored
         Projection l93 = Crs.resolve(2154, cc43Keys());
         assertSame(Crs.forEpsg(2154), l93);
+        Projection zone43 = Crs.resolve(3943, cc43Keys());
+        assertSame(Crs.forEpsg(3943), zone43);
         // code absent from the registry but parameters present: custom fallback
-        Projection cc43 = Crs.resolve(3943, cc43Keys());
+        Projection cc43 = Crs.resolve(3951, cc43Keys());
         assertTrue(cc43 instanceof LambertConformalConic2SP);
         double[] xy = cc43.project(43.0, 3.0);
         assertEquals(1700000.0, xy[0], 1e-6);
         assertEquals(2200000.0, xy[1], 1e-6);
         // neither a known code nor parameters: null (message carried by fromCustom)
-        org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(3943, null));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(3951, null));
         org.junit.jupiter.api.Assertions.assertNull(Crs.resolve(0, null));
     }
 }

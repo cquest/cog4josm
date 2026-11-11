@@ -63,7 +63,9 @@ public class AddCogLayerAction extends JosmAction {
                         tr("Unsupported coordinate reference system for this COG") + " (" + info.crsDescription() + ").\n"
                                 + tr("Reason: ") + why + "\n\n"
                                 + tr("Supported systems: EPSG:4326, EPSG:3857, "
-                                        + "WGS84 UTM zones (32601-32660, 32701-32760), EPSG:2154 (Lambert-93), "
+                                        + "WGS84 UTM zones (32601-32660, 32701-32760), "
+                                        + "EPSG:2154 (Lambert-93), EPSG:3942-3950 "
+                                        + "(Lambert-93 zones CC42-CC50), "
                                         + "and GeoTIFF \"user-defined\" systems with explicit parameters "
                                         + "(geographic, transverse Mercator, Lambert conformal conic)."),
                         tr("Unsupported projection"), JOptionPane.WARNING_MESSAGE);
