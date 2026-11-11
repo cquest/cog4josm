@@ -8,7 +8,7 @@
 > Je ne compte pas le maintenir, mais comme il fonctionne et rend un service réel, je préfère le partager.
 
 
-Plugin JOSM qui affiche des images **COG (Cloud Optimized GeoTIFF)** distantes
+Plugin JOSM qui affiche des images **COG ([Cloud Optimized GeoTIFF](https://cogeo.org/))** distantes
 comme couches d'arrière-plan, en les lisant **par HTTP byte-ranges** : jamais
 le fichier entier n'est téléchargé, seules les tuiles TIFF utiles sont
 récupérées (et mises en cache mémoire).

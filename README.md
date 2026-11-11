@@ -7,7 +7,7 @@
 > It is here under GPL license to conform to JOSM license, but would have more naturally let it under WTFPL.
 > I do not plan to maintain it, but as it works and can be useful, I prefer to share it.
 
-JOSM plugin displaying remote **COG (Cloud Optimized GeoTIFF)** imagery as
+JOSM plugin displaying remote **COG ([Cloud Optimized GeoTIFF](https://cogeo.org/))** imagery as
 background layers, read **through HTTP byte-ranges**: the whole file is
 never downloaded, only the needed TIFF tiles are fetched (and memory cached).
 
