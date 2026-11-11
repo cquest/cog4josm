@@ -1,4 +1,4 @@
-# josm-cog
+# cog4josm
 
 (English version: [README.md](README.md))
 
