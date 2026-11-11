@@ -20,12 +20,22 @@ never downloaded, only the needed TIFF tiles are fetched.
 - The test server (`CogFileServer`) now sends strong ETags and answers
   If-None-Match, so the end-to-end tests exercise real-world server
   behaviour.
-- Guarantees unchanged from 0.3.0: byte-range reads only, one request to
-  open a COG, speculative tile ring + base overview prefetch while
-  browsing (0.3.0), requested range echoed in the User-Agent comment
-  (debug-friendly server access logs), unsupported CRSs refused with an
-  explicit reason (never silently reprojected), and the jar contains no
-  third-party runtime code (pure GPL v2+).
+- **Speculative tail read** (phase 2.8 follow-up): header-tail COGs (the
+  GDAL driver's default layout — IFDs at the very end of the file) no
+  longer pay one request per IFD: a second speculative 32 KiB request
+  covers the tail, and parsing costs two requests in every layout.
+- **Lazy per-level tile tables** (phase 2.8 follow-up): a level's
+  TileOffsets/TileByteCounts tables over 4 KiB are fetched on that
+  level's first browse instead of at open — a deep pyramid explored at
+  overview zooms never downloads the full-resolution tables (which can
+  weigh hundreds of KiB).
+- Guarantees unchanged from 0.3.0: byte-range reads only, one request
+  to open a well-laid-out COG (two for header-tail files), speculative
+  tile ring + base overview prefetch while browsing (0.3.0), requested
+  range echoed in the User-Agent comment (debug-friendly server access
+  logs), unsupported CRSs refused with an explicit reason (never
+  silently reprojected), and the jar contains no third-party runtime
+  code (pure GPL v2+).
 
 ## Binary
 
@@ -66,13 +76,24 @@ sont lues.
 - Le serveur de test (`CogFileServer`) envoie désormais des ETag forts
   et répond à If-None-Match, pour que les tests de bout en bout
   exercent le comportement des serveurs réels.
+- **Lecture spéculative de la fin du fichier** (suivi phase 2.8) : les
+  COGs header-tail (agencement GDAL par défaut — IFD en toute fin de
+  fichier) ne paient plus une requête par IFD : une seconde requête
+  spéculative de 32 KiB couvre la queue, et le parsing coûte deux
+  requêtes dans tous les agencements.
+- **Tables de tuiles paresseuses par niveau** (suivi phase 2.8) : les
+  tables TileOffsets/TileByteCounts d'un niveau dépassant 4 Kio sont
+  lues à la première navigation sur ce niveau plutôt qu'à l'ouverture —
+  une pyramide profonde explorée en zoom dégrossi ne télécharge jamais
+  les tables pleine résolution (plusieurs centaines de Kio).
 - Garanties inchangées depuis la 0.3.0 : lecture par byte-ranges
-  uniquement, une seule requête pour ouvrir un COG, ourlet spéculatif de
-  tuiles et préchargement de l'aperçu racine à la navigation (0.3.0),
-  range demandé répété en commentaire du User-Agent (logs serveur
-  exploitables), systèmes de coordonnées non pris en charge refusés avec
-  un motif explicite (jamais de reprojection silencieuse), et le jar
-  n'embarque aucun code tiers à l'exécution (GPL v2+ pur).
+  uniquement, une seule requête pour ouvrir un COG bien agencé (deux
+  pour les fichiers header-tail), ourlet spéculatif de tuiles et
+  préchargement de l'aperçu racine à la navigation (0.3.0), range
+  demandé répété en commentaire du User-Agent (logs serveur
+  exploitables), systèmes de coordonnées non pris en charge refusés
+  avec un motif explicite (jamais de reprojection silencieuse), et le
+  jar n'embarque aucun code tiers à l'exécution (GPL v2+ pur).
 
 ## Binaire
 
