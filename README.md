@@ -83,7 +83,23 @@ centaine de mètres, acceptable pour un fond cartographique.
 
 ## Construire
 
-Prérequis : JDK 17+. L'API JOSM compilée est téléchargée par :
+Prérequis : un **JDK 17+ complet** (contenant `javac`), pas un simple
+JRE. Vérifiez avec `javac -version` ; si la commande manque, installez
+le JDK (Debian/Ubuntu : `sudo apt install openjdk-21-jdk-headless`).
+
+Sans `javac`, Gradle s'arrête sur une erreur de ce genre (le chemin
+indiqué est le JRE qu'il a détecté) :
+
+    Toolchain installation '/usr/lib/jvm/java-21-openjdk-amd64' does not
+    provide the required capabilities: [JAVA_COMPILER]
+
+Si plusieurs environnement Java coexistent, désignez le bon :
+
+```sh
+export JAVA_HOME=/chemin/vers/jdk      # doit contenir bin/javac
+```
+
+L'API JOSM compilée est téléchargée par :
 
 ```sh
 ./fetch-josm.sh          # place lib/josm-tested.jar
