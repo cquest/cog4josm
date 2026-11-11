@@ -306,4 +306,35 @@ class HttpRangeReaderTest {
             assertEquals(cached, rangeHits.get());
         }
     }
+
+    @Test
+    void speculativeRingMakesNeighbourPansFree() throws IOException {
+        // phase 2.7 E1: a fetched window is padded by one ring of tiles; a
+        // move fully inside that ring costs nothing and does not chase it
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            assertNotNull(r.getTile(0, 1, 1));
+            int afterFirst = rangeHits.get();
+            assertTrue(afterFirst >= 2, "head read + tile block(s)");
+            assertNotNull(r.getTile(0, 2, 1));
+            assertNotNull(r.getTile(0, 1, 2));
+            assertNotNull(r.getTile(0, 2, 2), "inside the prefetched ring");
+            assertEquals(afterFirst, rangeHits.get(), "neighbour tiles served from the ring LRU");
+        }
+    }
+
+    @Test
+    void prefetchBaseOverviewCostsOneMergedFetch() throws IOException {
+        // phase 2.7 E2: the coarsest level, when small, is decoded in one go
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            int afterOpen = rangeHits.get();
+            int coarsest = r.info().levelCount() - 1;
+            int n = r.prefetchBaseOverview(CogReader.OVERVIEW_PREFETCH_MAX_BYTES);
+            assertEquals(4, n, "the 2x2-tile 32 px overview of the fixture");
+            assertTrue(rangeHits.get() - afterOpen <= 2, "merged blocks: " + (rangeHits.get() - afterOpen));
+            int afterPrefetch = rangeHits.get();
+            assertNotNull(r.getTile(coarsest, 1, 1));
+            assertEquals(afterPrefetch, rangeHits.get(), "overview served from the LRU");
+            assertEquals(0, r.prefetchBaseOverview(1), "size cap respected");
+        }
+    }
 }

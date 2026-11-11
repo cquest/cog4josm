@@ -118,6 +118,12 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   The requested range is also echoed inside the User-Agent comment
   (`cog4josm/0.2.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
+  Each tile fetch window is padded by a speculative ring of one source
+  tile (`RING_TILES`, phase 2.7 E1: ring tiles join the decoded-tile
+  LRU only; extension only on a miss; capped by MAX_RING_TILES and
+  MAX_RING_BYTES so huge warp windows never pad), and the base overview
+  can be pre-decoded in one merged request (`prefetchBaseOverview`,
+  phase 2.7 E2, called from `AddCogLayerAction` on the worker pool).
   Rule: any new read path must choose deliberately between the metadata
   cache (`MetadataCachingSource`) and the direct source; never cache pixels
   **in the reader**. Composed 256 px display tiles are a different thing:
@@ -483,14 +489,17 @@ and `CogReader.open` seeds the metadata cache with one speculative 32 KiB
 head read that `MetadataCache` containment lookups then serve for every
 metadata range. Measured: first open of `cog-paris-3857.tif` over HTTP
 dropped from 14 requests to 1; reopening stays at 1.
-Phase 2.7 (planned): fewer raster requests while browsing — E1: compose
-the source window with a one-full-tile margin so the neighbouring tiles
-of the same level come from the decoded-tile LRU instead of the network
-(cost: roughly +30-50% bytes); E2: at layer load, fetch the root
-overview level in one merged request when it is small (cap ~2 MiB),
-making the initial zoomed-out view and zoom-out fallbacks free.
-Measure with an HTTP-aware CacheE2E (requests per pan before/after;
-FileSource-read baseline: 13 reads for one z12 display tile).
+Phase 2.7 (done): fewer raster requests while browsing — E1: a
+speculative ring of one extra tile row/column pads every fetch window
+in `CogReader.getTiles` (fetched in the same merged blocks, decoded into
+the tile LRU only, never in the returned map; the ring is only extended
+when the requested window actually misses, and is skipped beyond
+MAX_RING_TILES/MAX_RING_BYTES); E2: `CogReader.prefetchBaseOverview`
+fetches the base overview in one merged request under 2 MiB, run in the
+background (`MainApplication.worker`) at layer load. Measured (PanCount
+probe, z14 sweep of 90 display tiles over `cog-paris-3857.tif`): 20 to
+12 range requests while bytes stayed flat (+0.007%: the ring is mostly
+subsumed by the neighbouring windows on a real COG).
 Phase 2.8 (planned): metadata persistence across restarts — keep
 MetadataCache blocks in the JCS "cog" region keyed by the same
 fingerprint(url+size+etag), then validate opens with a conditional

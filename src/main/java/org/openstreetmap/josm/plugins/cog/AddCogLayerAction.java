@@ -83,6 +83,20 @@ public class AddCogLayerAction extends JosmAction {
             imageryInfo.setAttributionText(tr("COG: ") + url);
             CogImageryLayer layer = new CogImageryLayer(imageryInfo, reader);
             MainApplication.getLayerManager().addLayer(layer);
+            // E2 (phase 2.7): decode the base overview in the background so
+            // the zoomed-out view costs no request; failure is non-fatal
+            final CogReader prefetchReader = reader;
+            MainApplication.worker.execute(() -> {
+                try {
+                    int n = prefetchReader.prefetchBaseOverview(CogReader.OVERVIEW_PREFETCH_MAX_BYTES);
+                    if (n > 0) {
+                        Logging.info("josm-cog: base overview prefetched ({0} tiles)", n);
+                    }
+                } catch (IOException | RuntimeException ex) {
+                    Logging.warn("josm-cog: base overview prefetch failed (ignored)");
+                    Logging.warn(ex);
+                }
+            });
             // zoom is deferred: the map frame may still be under construction
             // (zero size) right after addLayer.
             final org.openstreetmap.josm.data.Bounds zoomBounds = latLonBounds(info, proj);

@@ -34,6 +34,13 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   d'une fenêtre) sont fusionnées en quelques requêtes `Range:` par bloc, sur
   le modèle de l'I/O recouvrant de GDAL — environ 2 à 4 requêtes par tuile
   d'affichage au lieu d'une par tuile source.
+* Remplissage spéculatif : chaque fenêtre de lecture est ourlée d'une
+  rangée supplémentaire de tuiles source (décodées dans le LRU de tuiles,
+  sans figurer dans le résultat), et l'aperçu racine est pré-chargé en
+  arrière-plan au chargement du calque s'il fait moins de 2 MiB — un
+  déplacement vers les tuiles d'affichage voisines ne coûte en général
+  aucune requête (mesuré : 20 → 12 requêtes sur un balayage de 90 tuiles,
+  octets stables).
 * Lecture spéculative d'en-tête : l'ouverture d'une source HTTP n'émet
   qu'une seule requête `bytes=0-32767`, qui prouve le support de `Range:`
   (plus de requête de sonde), révèle taille et ETag, et apporte en un aller
@@ -62,6 +69,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 |---|---|
 | Lecture byte-ranges, une seule lecture tête à l'ouverture | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
+| Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Cache LRU metadata (jamais le raster brut) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Conteneur BigTIFF (décalages 64 bits, fichiers PIX4Dmatic) | ✅ |

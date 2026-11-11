@@ -32,6 +32,12 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   window) are merged into a few `Range:` requests per block, following GDAL's
   overlapped-I/O model — about 2 to 4 requests per display tile instead of
   one per source tile.
+* Speculative padding: every fetch window is ringed by one extra row/column
+  of source tiles (decoded into the tile LRU, not part of the result), and
+  the base overview is pre-fetched in the background at layer load when it
+  is under 2 MiB — panning to neighbouring display tiles usually costs no
+  request at all (measured: 20 → 12 requests for a 90-tile sweep, bytes
+  flat).
 * Speculative head read: opening an HTTP source issues a single
   `bytes=0-32767` request which proves `Range:` support (no separate probe
   request), reveals size and ETag, and carries the header, IFDs and GeoKeys
@@ -58,6 +64,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 |---|---|
 | Byte-range reads, one head read at open (no probe) | ✅ |
 | Small ranges merged into block requests | ✅ |
+| Speculative tile ring + base overview prefetch | ✅ |
 | Metadata LRU cache (never raw raster) | ✅ |
 | Composed display tiles in JOSM's tile cache (memory + disk) | ✅ |
 | TIFF/GeoTIFF parser (IFD, sub-IFD, GeoKeys) | ✅ |
