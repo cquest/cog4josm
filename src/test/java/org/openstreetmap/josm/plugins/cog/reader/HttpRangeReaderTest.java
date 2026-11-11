@@ -207,7 +207,7 @@ class HttpRangeReaderTest {
         assertEquals(rangeRequests.size(), userAgents.size());
         for (int i = 0; i < rangeRequests.size(); i++) {
             String ua = userAgents.get(i);
-            assertEquals("cog4josm/0.2.0 (JOSM COG plugin; https://josm.openstreetmap.de; range="
+            assertEquals("cog4josm/0.3.0 (JOSM COG plugin; https://josm.openstreetmap.de; range="
                     + rangeRequests.get(i).substring("bytes=".length()) + ")", ua);
             assertTrue(ua.chars().allMatch(c -> c >= 0x20 && c <= 0x7E), "header stays ASCII: " + ua);
         }

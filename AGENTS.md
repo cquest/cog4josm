@@ -73,6 +73,12 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   compile failure (the "1 actionable task" message) and `cp` would deploy a
   stale jar.
 - Java 17 target (`options.release = 17`): do not use a more recent API.
+- **Release versioning**: at each release bump the version in `build.gradle`
+  (feeds the jar manifest `Plugin-Version`) AND the `USER_AGENT_PREFIX`
+  constant in `HttpRangeReader` AND its exact-match assertion in
+  `HttpRangeReaderTest` — three places, no single source today. Then
+  rebuild, copy the jar to `dist/cog4josm.jar`, commit, and move the
+  annotated tag to that commit so the tagged binary matches the release.
 - `lib/josm-tested.jar` is `compileOnly` (never bundled) and also
   `testImplementation`: the CRS tests read the projection table resource
   `/data/projection/custom-epsg` from it (see the phase 2.3 pitfalls).
@@ -116,7 +122,7 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   cache). Measured on `test_data/cog-paris-3857.tif` over local HTTP: first
   open went from 14 requests (probe + 13 metadata) to 1 head read.
   The requested range is also echoed inside the User-Agent comment
-  (`cog4josm/0.2.0 (…; range=a-b)`) because plain access logs do not
+  (`cog4josm/0.3.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
   Each tile fetch window is padded by a speculative ring of one source
   tile (`RING_TILES`, phase 2.7 E1: ring tiles join the decoded-tile
