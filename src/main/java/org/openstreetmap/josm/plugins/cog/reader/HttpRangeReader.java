@@ -1,13 +1,19 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Flow;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,8 +24,16 @@ import java.util.regex.Pattern;
  */
 public final class HttpRangeReader implements ByteSource {
 
-    private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)");
+    private static final Pattern CONTENT_RANGE = Pattern.compile("bytes\\s+(\\d{1,18})-(\\d{1,18})/(\\d{1,18}|\\*)");
     private static final int MAX_ATTEMPTS = 3;
+    /** Largest 206 body tolerated for the 1-byte probe before the server is refused. */
+    private static final int PROBE_BODY_CAP = 64;
+    /**
+     * Cap used when the body is unwanted (error status or 200 on a Range
+     * request): non-zero so the subscription is cancelled on the first chunk
+     * instead of draining the whole body, but too small to buffer anything.
+     */
+    private static final int DROP_BODY_CAP = 16;
 
     private final HttpClient client;
     private final URI uri;
@@ -74,9 +88,20 @@ public final class HttpRangeReader implements ByteSource {
         if (probed) {
             return;
         }
-        HttpResponse<byte[]> resp = send(rangeRequest("0-0"), HttpResponse.BodyHandlers.ofByteArray());
+        // the body is NEVER kept unbounded here: a server that ignores the
+        // Range header (status 200) would otherwise stream the whole file
+        // into RAM, so every body is capped (CappedBody) and the subscription
+        // is cancelled as soon as the cap is reached
+        HttpResponse<byte[]> resp = send(rangeRequest("0-0"),
+                ri -> new CappedBody(ri.statusCode() == 206 ? PROBE_BODY_CAP + 1L : DROP_BODY_CAP));
         int status = resp.statusCode();
         if (status == 206) {
+            byte[] body = resp.body();
+            if (body != null && body.length > PROBE_BODY_CAP) {
+                // a compliant 206 to bytes=0-0 is 1 byte: a bigger body is
+                // a hostile or broken server (CappedBody bounded the copy anyway)
+                throw new IOException("206 probe of " + uri + " with an unexpectedly large body");
+            }
             rangesSupported = true;
             String cr = header(resp, "Content-Range");
             Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
@@ -90,7 +115,16 @@ public final class HttpRangeReader implements ByteSource {
             size = Long.parseLong(total);
         } else if (status == 200) {
             rangesSupported = false;
-            size = resp.body().length;
+            String cl = header(resp, "Content-Length");
+            long declared = -1;
+            if (cl != null) {
+                try {
+                    declared = Long.parseLong(cl);
+                } catch (NumberFormatException ignored) {
+                    // keep -1: unknown size
+                }
+            }
+            size = declared;
         } else if (status >= 400) {
             throw new IOException("HTTP " + status + " while downloading " + uri);
         }
@@ -127,8 +161,12 @@ public final class HttpRangeReader implements ByteSource {
     }
 
     private byte[] fetchRange(long offset, int count) throws IOException {
+        // the 206 response body is capped at count+1 bytes (CappedBody): a
+        // hostile or broken server can never make us buffer more than the
+        // range we asked for; other statuses read almost nothing
+        // (DROP_BODY_CAP) before the subscription is cancelled
         HttpResponse<byte[]> resp = send(rangeRequest(offset + "-" + (offset + count - 1)),
-                HttpResponse.BodyHandlers.ofByteArray());
+                ri -> new CappedBody(ri.statusCode() == 206 ? (long) count + 1 : DROP_BODY_CAP));
         int status = resp.statusCode();
         if (status == 416) {
             throw new IOException("Range 416 on " + uri + " (size=" + size + ", request=" + offset + ")");
@@ -139,21 +177,23 @@ public final class HttpRangeReader implements ByteSource {
         if (status < 200 || status >= 300) {
             throw new IOException("HTTP " + status + " on " + uri);
         }
-        byte[] body = resp.body();
-        if (status == 206) {
-            String cr = header(resp, "Content-Range");
-            Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
-            if (m != null && m.matches() && Long.parseLong(m.group(1)) != offset) {
-                throw new IOException("Inconsistent Content-Range for " + uri + ": " + cr);
-            }
+        if (status != 206) {
+            // 200 on a Range request: the whole file would come, never accepted
+            throw new RangeNotSupportedException(uri.toString());
+        }
+        String cr = header(resp, "Content-Range");
+        Matcher m = cr == null ? null : CONTENT_RANGE.matcher(cr);
+        if (m != null && m.matches() && Long.parseLong(m.group(1)) != offset) {
+            throw new IOException("Inconsistent Content-Range for " + uri + ": " + cr);
+        }
+        byte[] body = resp.body() == null ? new byte[0] : resp.body();
+        if (body.length > count) {
+            // the copy was capped at count+1: the server sent more than requested
+            throw new IOException("Server sent more than the requested range ("
+                    + count + " bytes) on " + uri);
         }
         if (body.length < count) {
             throw new ShortReadException("Incomplete range (" + body.length + "/" + count + ") on " + uri);
-        }
-        if (body.length > count) {
-            byte[] trimmed = new byte[count];
-            System.arraycopy(body, 0, trimmed, 0, count);
-            return trimmed;
         }
         return body;
     }
@@ -172,7 +212,7 @@ public final class HttpRangeReader implements ByteSource {
         return b.build();
     }
 
-    private HttpResponse<byte[]> send(HttpRequest req, HttpResponse.BodyHandler<byte[]> handler) throws IOException {
+    private <T> HttpResponse<T> send(HttpRequest req, HttpResponse.BodyHandler<T> handler) throws IOException {
         try {
             return client.send(req, handler);
         } catch (InterruptedException e) {
@@ -196,6 +236,75 @@ public final class HttpRangeReader implements ByteSource {
     private static final class ShortReadException extends IOException {
         ShortReadException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Body subscriber that copies at most {@code keep} bytes, then cancels the
+     * subscription: a hostile or broken server can never make this client
+     * buffer more than {@code keep} bytes. A result of exactly {@code keep}
+     * bytes means the real body was at least that big (JDK 17 has no
+     * {@code BodySubscribers.limit}, added only in JDK 21).
+     */
+    private static final class CappedBody implements HttpResponse.BodySubscriber<byte[]> {
+
+        private final long keep;
+        private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+        private final CompletableFuture<byte[]> done = new CompletableFuture<>();
+        private volatile Flow.Subscription subs;
+
+        CappedBody(long keep) {
+            this.keep = keep;
+        }
+
+        @Override
+        public CompletionStage<byte[]> getBody() {
+            return done;
+        }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            this.subs = subscription;
+            subscription.request(Long.MAX_VALUE);
+        }
+
+        @Override
+        public void onNext(List<ByteBuffer> buffers) {
+            if (done.isDone()) {
+                return;
+            }
+            boolean overflow = false;
+            for (ByteBuffer b : buffers) {
+                if (out.size() + b.remaining() > keep) {
+                    copy(b, (int) Math.max(0, keep - out.size()));
+                    overflow = true;
+                    break;
+                }
+                copy(b, b.remaining());
+            }
+            if (overflow) {
+                subs.cancel();
+                done.complete(out.toByteArray());
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            done.completeExceptionally(throwable);
+        }
+
+        @Override
+        public void onComplete() {
+            done.complete(out.toByteArray());
+        }
+
+        private void copy(ByteBuffer b, int n) {
+            if (n <= 0) {
+                return;
+            }
+            byte[] chunk = new byte[n];
+            b.get(chunk);
+            out.write(chunk, 0, n);
         }
     }
 

@@ -89,7 +89,10 @@ public class AddCogLayerAction extends JosmAction {
             zoomTimer.setRepeats(false);
             zoomTimer.start();
             Logging.info("josm-cog: layer added for {0} ({1} levels)", url, info.levelCount());
-        } catch (IOException | IllegalArgumentException ex) {
+        } catch (IOException | RuntimeException ex) {
+            // RuntimeException: a hostile file could still escape a hardening
+            // path (array bounds, parse): it must show an error dialog, never
+            // an uncaught exception on the EDT
             Logging.warn("josm-cog: refused opening for {0}", url);
             Logging.warn(ex);
             if (reader != null) {

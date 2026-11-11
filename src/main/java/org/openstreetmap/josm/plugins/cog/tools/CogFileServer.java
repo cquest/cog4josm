@@ -35,7 +35,8 @@ public final class CogFileServer {
         }
         Path root = Paths.get(args[0]).toAbsolutePath().normalize();
         int port = Integer.parseInt(args[1]);
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        // loopback only: this test server exposes the whole directory tree
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.createContext("/", exchange -> handle(exchange, root));
         server.start();
         System.out.println("CogFileServer listening on http://127.0.0.1:" + port + "/ root=" + root);

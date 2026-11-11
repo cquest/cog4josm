@@ -40,6 +40,9 @@ class HttpRangeReaderTest {
         port = server.getAddress().getPort();
         server.createContext("/image.tif", this::serve);
         server.createContext("/noranges.tif", this::serveNoRange);
+        server.createContext("/huge200.tif", this::serveHuge200);
+        server.createContext("/badrange.tif", this::serveBadRange);
+        server.createContext("/fat206.tif", this::serveFat206);
         server.start();
     }
 
@@ -95,6 +98,56 @@ class HttpRangeReaderTest {
         }
     }
 
+    /** Ignores Range and streams a chunked multi-MB 200 (memory bomb attempt). */
+    private void serveHuge200(HttpExchange ex) throws IOException {
+        try {
+            ex.sendResponseHeaders(200, 0); // chunked
+            try (OutputStream os = ex.getResponseBody()) {
+                byte[] zeros = new byte[64 << 10];
+                for (int i = 0; i < 128; i++) { // 8 MB
+                    os.write(zeros);
+                }
+            } catch (IOException clientGone) {
+                // the reader may abort early: expected
+            }
+        } finally {
+            ex.close();
+        }
+    }
+
+    /** 206 with absurd Content-Range digits (Long.parseLong overflow attempt). */
+    private void serveBadRange(HttpExchange ex) throws IOException {
+        try {
+            ex.getResponseHeaders().add("Content-Range", "bytes 0-0/99999999999999999999999");
+            ex.sendResponseHeaders(206, 1);
+            try (OutputStream os = ex.getResponseBody()) {
+                os.write(0);
+            } catch (IOException clientGone) {
+                // expected
+            }
+        } finally {
+            ex.close();
+        }
+    }
+
+    /** 206 that announces and sends 4 MB where 1 byte was requested. */
+    private void serveFat206(HttpExchange ex) throws IOException {
+        try {
+            ex.getResponseHeaders().add("Content-Range", "bytes 0-4194303/4194304");
+            ex.sendResponseHeaders(206, 4 << 20);
+            try (OutputStream os = ex.getResponseBody()) {
+                byte[] zeros = new byte[64 << 10];
+                for (int i = 0; i < 64; i++) {
+                    os.write(zeros);
+                }
+            } catch (IOException clientGone) {
+                // the reader aborts at the cap: expected
+            }
+        } finally {
+            ex.close();
+        }
+    }
+
     private static byte[] cogBytes() {
         try {
             return TestTiffWriter.write(List.of(
@@ -134,6 +187,28 @@ class HttpRangeReaderTest {
     void rejectsServerWithoutRangeSupport() {
         IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/noranges.tif")));
         assertTrue(e instanceof RangeNotSupportedException, e.toString());
+    }
+
+    @Test
+    void probeDoesNotBufferIgnoredRangeBody() {
+        // audit POC: a server ignoring Range used to stream its WHOLE body
+        // into memory during the probe; the body must be discarded instead
+        IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/huge200.tif")));
+        assertTrue(e instanceof RangeNotSupportedException, e.toString());
+    }
+
+    @Test
+    void absurdContentRangeDigitsRejected() {
+        // 23-digit totals used to escape as NumberFormatException (unchecked)
+        IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/badrange.tif")));
+        assertTrue(e.getMessage().contains("Content-Range"), e.getMessage());
+    }
+
+    @Test
+    void oversizedProbeBodyRejected() {
+        // 4 MB of body for a 1-byte probe: capped, surfaces as IOException
+        IOException e = assertThrows(IOException.class, () -> CogReader.open(url("/fat206.tif")));
+        assertTrue(e.getMessage().contains("large body"), e.getMessage());
     }
 
     @Test
