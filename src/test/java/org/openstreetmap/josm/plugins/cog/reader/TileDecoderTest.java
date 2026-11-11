@@ -96,7 +96,7 @@ class TileDecoderTest {
     /**
      * JPEG tile written by GDAL (COG driver): no DQT in the stream,
      * quantization tables in the JPEGTables tag (347).
-     * Fixture extracted from cog-paris-3857.tif (gdalwarp -of COG -co COMPRESS=JPEG).
+     * Fixture extracted from test_data/cog-paris-3857.tif (gdalwarp -of COG -co COMPRESS=JPEG).
      */
     @Test
     void jpegTileWithExternalTables() throws IOException {
