@@ -7,12 +7,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Minimal TIFF/BigTIFF/GeoTIFF parser for COGs: header, IFD chain,
  * TileOffsets/TileByteCounts arrays, GeoTIFF geographic tags. It reads only the
  * strictly necessary bytes through a {@link ByteSource}. BigTIFF (magic 43,
  * 64-bit offsets, 20-byte IFD entries) is read as well as classic TIFF (42).
+ * Tile tables bigger than {@code DEFERRED_ARRAY_BYTES} are parsed lazily: the
+ * IFD chain and the small tag values load at open, the huge per-level tables
+ * only when the level is first browsed (on a deep pyramid browsed at overview
+ * zooms, the full-resolution tables never cost a request).
  */
 public final class TiffParser {
 
@@ -74,6 +79,16 @@ public final class TiffParser {
     private static final long VALUE_MAX_BLOCK = 4L << 20;
 
     /**
+     * Lazy per-level IFD parsing: a TileOffsets/TileByteCounts table bigger
+     * than this is NOT fetched when the IFD is read, but only when the level
+     * is first browsed (see {@link Ifd#loadDeferred}). A deep pyramid browsed
+     * at overview zooms then never pays for the full-resolution tables, at
+     * open nor in the persisted metadata store. Smaller tables keep the
+     * eager merged fetch (they ride the head/tail block for free).
+     */
+    private static final int DEFERRED_ARRAY_BYTES = 4096;
+
+    /**
      * Upper bound on the number of entries in one IFD: real IFDs hold tens of
      * tags; a 64-bit entry count (BigTIFF) is attacker-controlled and must not
      * drive the metadata read size.
@@ -112,11 +127,60 @@ public final class TiffParser {
         public final long offset;
         public final long nextIfdOffset;
         final Map<Integer, IfdEntry> entries;
+        private final boolean be;
+        /**
+         * Huge tag values not fetched yet ({tag, type, count, offset, length}
+         * — see DEFERRED_ARRAY_BYTES), null when this IFD has none left.
+         */
+        private volatile List<long[]> deferred;
 
-        Ifd(long offset, long nextIfdOffset, Map<Integer, IfdEntry> entries) {
+        Ifd(long offset, long nextIfdOffset, Map<Integer, IfdEntry> entries,
+            boolean be, List<long[]> deferred) {
             this.offset = offset;
             this.nextIfdOffset = nextIfdOffset;
             this.entries = entries;
+            this.be = be;
+            this.deferred = deferred;
+        }
+
+        /** True when the tag exists in this IFD but its huge value was deferred. */
+        boolean isDeferred(int tag) {
+            List<long[]> d = deferred;
+            if (d == null) {
+                return false;
+            }
+            for (long[] p : d) {
+                if (p[0] == tag) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Fetches and decodes the deferred values (huge tile tables) of this
+         * IFD in merged blocks, through the source it was parsed with;
+         * idempotent, thread safe, retryable after an IO failure.
+         */
+        synchronized void loadDeferred(ByteSource src) throws IOException {
+            List<long[]> d = deferred;
+            if (d == null) {
+                return;
+            }
+            List<long[]> ranges = new ArrayList<>(d.size());
+            for (long[] p : d) {
+                ranges.add(new long[]{p[3], p[4]});
+            }
+            List<RangePlanner.Block> blocks = RangePlanner.plan(ranges, VALUE_MAX_GAP, VALUE_MAX_BLOCK);
+            byte[][] blockData = new byte[blocks.size()][];
+            for (int b = 0; b < blocks.size(); b++) {
+                blockData[b] = src.read(blocks.get(b).offset, blocks.get(b).length);
+            }
+            for (long[] p : d) {
+                byte[] data = sliceFetched(blockData, blocks, p[3], (int) p[4], src);
+                entries.put((int) p[0], decodeValue((int) p[1], p[2], data, be));
+            }
+            deferred = null;
         }
 
         public boolean has(int tag) {
@@ -158,7 +222,11 @@ public final class TiffParser {
         long firstIfd;
     }
 
-    /** Reads the header, then follows the IFD chain (max 32). */
+    /**
+     * Reads the header, then follows the IFD chain (max 32). Huge tile tables
+     * (DEFERRED_ARRAY_BYTES) are not fetched here: they load on first use of
+     * the level ({@link Ifd#loadDeferred}).
+     */
     public static List<Ifd> readIfds(ByteSource src, boolean[] bigEndianOut) throws IOException {
         byte[] head = src.read(0, 16);
         if (head.length < 8) {
@@ -241,7 +309,9 @@ public final class TiffParser {
         long[] counts = new long[usable];
         long[] extOff = new long[usable];
         long[] extLen = new long[usable];
+        boolean[] isDeferred = new boolean[usable];
         List<long[]> ranges = new ArrayList<>();
+        List<long[]> deferred = new ArrayList<>();
         for (int i = 0; i < usable; i++) {
             int p = i * entrySize;
             tags[i] = readU16(block, p, be);
@@ -268,7 +338,15 @@ public final class TiffParser {
                     continue;
                 }
                 extLen[i] = Math.min(total, 1L << 26);
-                ranges.add(new long[]{extOff[i], extLen[i]});
+                if ((tags[i] == TAG_TILE_OFFSETS || tags[i] == TAG_TILE_BYTE_COUNTS)
+                        && extLen[i] > DEFERRED_ARRAY_BYTES) {
+                    // lazy per-level IFD parsing: huge tile tables are only
+                    // worth fetching when the level is actually browsed
+                    isDeferred[i] = true;
+                    deferred.add(new long[]{tags[i], types[i], counts[i], extOff[i], extLen[i]});
+                } else {
+                    ranges.add(new long[]{extOff[i], extLen[i]});
+                }
             }
         }
         // external tag values are usually stored contiguously after the IFD:
@@ -279,9 +357,14 @@ public final class TiffParser {
             RangePlanner.Block blk = blocks.get(b);
             blockData[b] = src.read(blk.offset, blk.length);
         }
-        Map<Integer, IfdEntry> entries = new HashMap<>();
+        Map<Integer, IfdEntry> entries = new ConcurrentHashMap<>();
         for (int i = 0; i < usable; i++) {
             if (types[i] == 0) {
+                continue;
+            }
+            if (isDeferred[i]) {
+                // placeholder keeping has()/entry() honest until loadDeferred
+                entries.put(tags[i], new IfdEntry(types[i], counts[i], null, null, null));
                 continue;
             }
             byte[] data;
@@ -296,7 +379,7 @@ public final class TiffParser {
             entries.put(tags[i], decodeValue(types[i], counts[i], data, be));
         }
         long nextIfd = big ? readLong(next, 0, be) : Integer.toUnsignedLong(readInt(next, 0, be));
-        return new Ifd(offset, nextIfd, entries);
+        return new Ifd(offset, nextIfd, entries, be, deferred.isEmpty() ? null : deferred);
     }
 
     /** Extracts one value from its pre-fetched merged block (fallback: direct read). */
@@ -422,7 +505,7 @@ public final class TiffParser {
         List<Ifd> ifds = readIfds(src, be);
         List<CogInfo.Level> levels = new ArrayList<>();
         for (Ifd ifd : ifds) {
-            CogInfo.Level lvl = toLevel(ifd, levels.size(), be[0]);
+            CogInfo.Level lvl = toLevel(ifd, levels.size(), be[0], src);
             if (lvl != null) {
                 levels.add(lvl);
             }
@@ -489,7 +572,7 @@ public final class TiffParser {
         levels.sort((a, b) -> Long.compare((long) b.width * b.height, (long) a.width * a.height));
     }
 
-    private static CogInfo.Level toLevel(Ifd ifd, int index, boolean be) throws IOException {
+    private static CogInfo.Level toLevel(Ifd ifd, int index, boolean be, ByteSource src) throws IOException {
         if (!ifd.has(TAG_TILE_WIDTH) || !ifd.has(TAG_TILE_LENGTH)
                 || !ifd.has(TAG_TILE_OFFSETS) || !ifd.has(TAG_TILE_BYTE_COUNTS)) {
             return null;
@@ -503,10 +586,24 @@ public final class TiffParser {
                 || ifd.getLong(TAG_PHOTOMETRIC, 1) == 4) {
             return null;
         }
+        // lazy per-level parsing: when the tile tables were deferred, their
+        // declared entry count stands in for the arrays until first browse
+        boolean lazy = ifd.isDeferred(TAG_TILE_OFFSETS) || ifd.isDeferred(TAG_TILE_BYTE_COUNTS);
         long[] offsets = ifd.getLongs(TAG_TILE_OFFSETS);
         long[] counts = ifd.getLongs(TAG_TILE_BYTE_COUNTS);
-        if (offsets == null || counts == null || offsets.length != counts.length) {
-            return null;
+        long tableLen;
+        if (lazy) {
+            IfdEntry eo = ifd.entry(TAG_TILE_OFFSETS);
+            IfdEntry ec = ifd.entry(TAG_TILE_BYTE_COUNTS);
+            if (eo == null || ec == null) {
+                return null;
+            }
+            tableLen = Math.min(eo.count, ec.count);
+        } else {
+            if (offsets == null || counts == null || offsets.length != counts.length) {
+                return null;
+            }
+            tableLen = offsets.length;
         }
         int width = (int) ifd.getLong(TAG_IMAGE_WIDTH, 0);
         int height = (int) ifd.getLong(TAG_IMAGE_LENGTH, 0);
@@ -525,10 +622,10 @@ public final class TiffParser {
             throw new IOException("Declared tile size " + tw + "x" + th + " exceeds the maximum supported "
                     + MAX_TILE_DIM + "x" + MAX_TILE_DIM + " (not a COG, or corrupted)");
         }
-        if (numX * numY > offsets.length) {
+        if (numX * numY > tableLen) {
             throw new IOException("TileOffsets/TileByteCounts too short for the declared "
                     + width + "x" + height + " image (" + tw + "x" + th + " tiles): "
-                    + offsets.length + " entries for " + numX + "x" + numY + " tiles");
+                    + tableLen + " entries for " + numX + "x" + numY + " tiles");
         }
         if (ifd.getLong(TAG_PLANAR_CONFIG, 1) != 1) {
             throw new IOException("PlanarConfiguration=2 not supported");
@@ -561,7 +658,8 @@ public final class TiffParser {
                 samples, bits, extras,
                 (int) ifd.getLong(TAG_SAMPLE_FORMAT, 1),
                 (int) ifd.getLong(TAG_NEW_SUBFILETYPE, 0),
-                be, offsets, counts, jpegTables);
+                be, lazy ? null : offsets, lazy ? null : counts, jpegTables,
+                lazy ? ifd : null, lazy ? src : null);
     }
 
     /** JPEG tables of the JPEGTables tag (347), or null if missing/empty. */

@@ -45,6 +45,11 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   default layout: IFDs at the very end) gets one more speculative request
   covering the last 32 KiB — two requests per open in every layout, never
   one per IFD.
+* Lazy per-level tile tables: a level's TileOffsets/TileByteCounts table
+  over 4 KiB is not fetched at open but when that level is first browsed
+  — exploring a deep pyramid at overview zooms never downloads the
+  full-resolution tables (on a 5-level fixture: 178 KiB of tables stay
+  on the server until their levels are used).
 * LRU cache of **metadata only** (header, IFDs, tile offset tables),
   validated by size/ETag and looked up by containment (a bigger cached block
   serves smaller reads): reopening the same COG costs that single head
@@ -72,6 +77,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Feature | Status |
 |---|---|
 | Byte-range reads, head + tail blocks at open (no probe) | ✅ |
+| Tile tables fetched lazily, per level, on first use | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Speculative tile ring + base overview prefetch | ✅ |
 | Persistent metadata + conditional GET (304 on reopen) | ✅ |

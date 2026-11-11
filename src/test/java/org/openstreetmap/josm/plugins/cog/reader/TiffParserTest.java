@@ -48,13 +48,67 @@ class TiffParserTest {
                 new TestTiffWriter.LevelSpec(32, 32, 1, 1, 8, true)), 3857, 1.0, 0.0, 0.0);
         CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
         CogInfo.Level l = ci.level(0);
-        assertEquals(4, l.tileOffsets.length);
-        for (int i = 0; i < l.tileOffsets.length; i++) {
-            for (int j = i + 1; j < l.tileOffsets.length; j++) {
-                assertTrue(l.tileOffsets[i] != l.tileOffsets[j], "distinct offsets");
+        long[] offs = l.tileOffsets();
+        long[] cnts = l.tileByteCounts();
+        assertEquals(4, offs.length);
+        for (int i = 0; i < offs.length; i++) {
+            for (int j = i + 1; j < offs.length; j++) {
+                assertTrue(offs[i] != offs[j], "distinct offsets");
             }
-            assertTrue(l.tileOffsets[i] + l.tileByteCounts[i] <= tiff.length, "within the file");
+            assertTrue(offs[i] + cnts[i] <= tiff.length, "within the file");
         }
+    }
+
+    @Test
+    void hugeTileTablesLoadOnlyOnFirstLevelUse() throws IOException {
+        // lazy per-level IFD parsing: the 33x33-tile tables (2 x 4,356 bytes,
+        // above the 4,096-byte threshold) must not be fetched at parse time
+        byte[] tiff = TestTiffWriter.writeTail(List.of(
+                new TestTiffWriter.LevelSpec(528, 528, 1, 1, 8, true),
+                new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)), 3857, 1.0, 0.0, 0.0);
+        final InMemoryByteSource mem = new InMemoryByteSource(tiff);
+        final int[] reads = new int[1];
+        final long[] bytes = new long[1];
+        ByteSource counting = new ByteSource() {
+            @Override
+            public long size() throws IOException {
+                return mem.size();
+            }
+
+            @Override
+            public boolean supportsRanges() {
+                return true;
+            }
+
+            @Override
+            public byte[] read(long offset, int length) throws IOException {
+                reads[0]++;
+                byte[] d = mem.read(offset, length);
+                bytes[0] += d.length;
+                return d;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        CogInfo ci = TiffParser.parse(counting);
+        // header + IFD chain + tiny eager values (L1 tables 8 B, geo block):
+        // far below the 8,712 bytes of the deferred L0 tables
+        assertTrue(bytes[0] < 8_000, "parse alone: " + bytes[0] + " bytes read");
+        CogInfo.Level l0 = ci.level(0);
+        assertEquals(33 * 33, l0.numXTiles() * l0.numYTiles());
+        int readsAfterParse = reads[0];
+        l0.ensureTileArrays();
+        assertTrue(reads[0] > readsAfterParse, "the tables are fetched on first use");
+        assertEquals(33 * 33, l0.tileOffsets().length);
+        assertEquals(33 * 33, l0.tileByteCounts().length);
+        int readsAfterLoad = reads[0];
+        l0.ensureTileArrays();
+        assertEquals(readsAfterLoad, reads[0], "ensureTileArrays is idempotent");
+        // small L1 tables stayed eager: no further read when used
+        assertEquals(1, ci.level(1).tileOffsets().length);
+        assertEquals(readsAfterLoad, reads[0], "eager tables never re-fetched");
     }
 
     @Test

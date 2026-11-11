@@ -54,6 +54,7 @@ class HttpRangeReaderTest {
         port = server.getAddress().getPort();
         server.createContext("/image.tif", this::serve);
         server.createContext("/tail.tif", this::serveTail);
+        server.createContext("/big.tif", this::serveBig);
         server.createContext("/noranges.tif", this::serveNoRange);
         server.createContext("/huge200.tif", this::serveHuge200);
         server.createContext("/badrange.tif", this::serveBadRange);
@@ -73,6 +74,11 @@ class HttpRangeReaderTest {
     /** Header-tail layout COG: IFDs and tables at the very end of the file. */
     private void serveTail(HttpExchange ex) throws IOException {
         serveBytes(ex, tailBytes(), tailEtag());
+    }
+
+    /** Deep-pyramid header-tail COG: huge tile tables outside the tail block. */
+    private void serveBig(HttpExchange ex) throws IOException {
+        serveBytes(ex, bigBytes(), bigEtag());
     }
 
     private void serveBytes(HttpExchange ex, byte[] tiff, String etag) throws IOException {
@@ -187,6 +193,7 @@ class HttpRangeReaderTest {
     /** Strong ETag of the fixture, as a real COG host would serve one. */
     private static String testEtag;
     private static String tailEtag;
+    private static String bigEtag;
 
     private static String testEtag() {
         if (testEtag == null) {
@@ -200,6 +207,13 @@ class HttpRangeReaderTest {
             tailEtag = etagOf(tailBytes());
         }
         return tailEtag;
+    }
+
+    private static String bigEtag() {
+        if (bigEtag == null) {
+            bigEtag = etagOf(bigBytes());
+        }
+        return bigEtag;
     }
 
     private static String etagOf(byte[] t) {
@@ -239,6 +253,32 @@ class HttpRangeReaderTest {
             throw new AssertionError(e);
         }
     }
+
+    /**
+     * Deep-pyramid header-tail fixture (~5.94 MB, gray uncompressed 8-bit):
+     * 5 levels of 2080/1040/520/260/16 px; the TileOffsets+TileByteCounts
+     * tables of the three deepest levels measure 135,200 + 33,800 + 8,712
+     * bytes — above the 4,096-byte lazy threshold, and outside the 32 KiB
+     * tail block except for the level-2 one.
+     */
+    private static byte[] bigBytes() {
+        if (bigTiff == null) {
+            try {
+                bigTiff = TestTiffWriter.writeTail(List.of(
+                        new TestTiffWriter.LevelSpec(2080, 2080, 1, 1, 8, true),
+                        new TestTiffWriter.LevelSpec(1040, 1040, 1, 1, 8, true),
+                        new TestTiffWriter.LevelSpec(520, 520, 1, 1, 8, true),
+                        new TestTiffWriter.LevelSpec(260, 260, 1, 1, 8, true),
+                        new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, true)),
+                        3857, 10.0, 500000.0, 6250000.0);
+            } catch (IOException e) {
+                throw new AssertionError(e);
+            }
+        }
+        return bigTiff;
+    }
+
+    private static byte[] bigTiff;
 
     private String url(String path) {
         return "http://127.0.0.1:" + port + path;
@@ -527,6 +567,46 @@ class HttpRangeReaderTest {
                 for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
                     Files.deleteIfExists(p);
                 }
+            }
+        }
+    }
+
+    @Test
+    void deepPyramidDefersHugeTileTablesUntilTheLevelIsUsed() throws IOException {
+        // lazy per-level IFD parsing: the deep levels' tile tables (135,200 +
+        // 33,800 + 8,712 bytes) are not fetched at open; only the tiny eager
+        // geo block costs a third request on top of head + tail
+        MetadataCache.global().clearAll();
+        try (CogReader r = CogReader.open(url("/big.tif"))) {
+            assertEquals(3857, r.info().crsCode);
+            assertEquals(5, r.info().levelCount());
+            assertEquals(3, rangeHits.get(), "head + tail + one small eager geo block");
+            assertEquals(32768 + 32768 + 96, rangeBytes.get(), "not one table byte at open");
+            // level 2: its 8,712-byte table sits inside the cached tail block
+            long bytesBefore = rangeBytes.get();
+            assertNotNull(r.getTile(2, 5, 5));
+            assertTrue(rangeBytes.get() - bytesBefore < 4096,
+                    "L2 tables sliced from the tail block: " + (rangeBytes.get() - bytesBefore));
+            // level 1: the 33,800-byte table comes in one merged request, now
+            bytesBefore = rangeBytes.get();
+            assertNotNull(r.getTile(1, 10, 10));
+            assertTrue(rangeBytes.get() - bytesBefore >= 33_800, "deferred L1 table fetched now");
+            // level 0: 135,200 bytes of tables, still never fetched until now
+            bytesBefore = rangeBytes.get();
+            assertNotNull(r.getTile(0, 60, 60));
+            assertTrue(rangeBytes.get() - bytesBefore >= 135_200, "deferred L0 table fetched now");
+            // reopen in the same JVM: one conditional request, metadata and
+            // already-loaded tables served from the memory LRU
+            int reqBefore = rangeHits.get();
+            bytesBefore = rangeBytes.get();
+            try (CogReader r2 = CogReader.open(url("/big.tif"))) {
+                assertEquals(3857, r2.info().crsCode);
+                assertEquals(1, rangeHits.get() - reqBefore, "conditional head read only");
+                assertEquals(0, rangeBytes.get() - bytesBefore, "304: parse without one body byte");
+                bytesBefore = rangeBytes.get();
+                assertNotNull(r2.getTile(0, 60, 60));
+                assertTrue(rangeBytes.get() - bytesBefore < 4096,
+                        "the L0 table stays in the metadata cache: raster only");
             }
         }
     }

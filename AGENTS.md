@@ -126,7 +126,13 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   `offset >= size - 32 KiB` triggers one speculative **tail block** read
   of the same size (`HttpRangeReader.knownSize` — never a probe), cached
   and persisted exactly like the head. Measured on the `/tail.tif`
-  fixture: exactly 2 requests per open in every layout.
+  fixture: exactly 2 requests per open in every layout. Lazy per-level
+  parsing: a TileOffsets/TileByteCounts table over 4 KiB
+  (`DEFERRED_ARRAY_BYTES`) is fetched on the first tile request of its
+  level, not at open (`Ifd.loadDeferred` via `CogInfo.Level.
+  ensureTileArrays`) — browsing a deep pyramid at overview zooms never
+  pays for the full-resolution tables (measured `/big.tif`: open stays
+  at 3 requests / 65,664 bytes while 178 KiB of tables wait).
   The requested range is also echoed inside the User-Agent comment
   (`cog4josm/0.4.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
@@ -547,8 +553,8 @@ one store): second-session open 1 request / 32768 bytes -> 1 request /
 0 bytes. Caps: 4 MiB per file, 1 MiB per block, 16 MiB per directory
 (oldest pruned); corrupt files are ignored, writes are atomic, all IO
 best-effort. Follow-ups for hostile layouts: the speculative tail read
-shipped right after (see the next paragraph); lazy per-level IFD
-parsing stays open.
+and the lazy per-level IFD parsing, both shipped right after (see the
+next two paragraphs).
 
 Phase 2.8 follow-up (done): speculative tail read for header-tail COGs.
 `MetadataCachingSource.read`, on a metadata miss at `offset >= size -
@@ -559,6 +565,23 @@ goes into the metadata cache and — since `mirrorToStore` now runs AFTER
 (`TestTiffWriter.writeTail`, IFDs at EOF): open = exactly 2 requests
 (`bytes=0-32767` + last 32 KiB), reopen with store = one 304, zero body
 bytes, IFD chain parsed from disk.
+
+Phase 2.8 follow-up 2 (done): lazy per-level IFD parsing. A TileOffsets/
+TileByteCounts entry bigger than 4 KiB (`TiffParser.DEFERRED_ARRAY_BYTES`)
+is NOT fetched when its IFD is read: `readIfd` records it as pending (the
+entries map keeps a placeholder so `has()`/`entry()` stay honest) and
+`CogInfo.Level.ensureTileArrays` — called by every tile-offset accessor —
+fetches it in one RangePlanner-merged block through the parse-time
+source (so the bytes land in the metadata cache) on the first tile
+request of that level. Smaller tables keep the eager merged fetch (they
+ride the head/tail block for free — zero behavior change for shallow
+pyramids). The "tables too short for the declared size" hardening runs
+at open on the declared entry count and again at load on the fetched
+bytes. Fixture `/big.tif` (header-tail, 5 levels, 135.2 + 33.8 + 8.7
+KiB of tables): open = 3 requests / 65,664 bytes (head + tail + 96-byte
+eager geo block); each big table arrives exactly when its level is first
+browsed, then stays cached (memory; mirrored to the store by the next
+open).
 
 Marginal items, take only in passing: in-flight byte-range dedup
 between concurrent tile jobs (the tile LRU already covers most cases),

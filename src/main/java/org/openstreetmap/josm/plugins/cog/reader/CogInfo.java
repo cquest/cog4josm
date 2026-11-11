@@ -1,5 +1,6 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
@@ -30,8 +31,20 @@ public final class CogInfo {
         public final int flags;
         /** Endianness of the TIFF file (MM = true, II = false): applies to 16-bit samples. */
         public final boolean bigEndian;
-        public final long[] tileOffsets;
-        public final long[] tileByteCounts;
+        /**
+         * TileOffsets/TileByteCounts tables — read them through {@link
+         * #tileOffsets()} / {@link #tileByteCounts()}: a huge table (deep
+         * pyramid full-res level) was not fetched at parse time but loads on
+         * first use of the level (lazy per-level parsing, see TiffParser),
+         * and is null before that.
+         */
+        private volatile long[] tileOffsets;
+        private volatile long[] tileByteCounts;
+        /** IFD whose tile tables were deferred; null when they are all loaded. */
+        private final TiffParser.Ifd lazyIfd;
+        /** Metadata source the deferred tables are fetched through. */
+        private final ByteSource metaSrc;
+        private volatile boolean arraysLoaded;
         /**
          * External JPEG tables (TIFF JPEGTables tag 347), null when missing.
          * GDAL stores the quantization tables there when the compressed JPEG
@@ -53,6 +66,16 @@ public final class CogInfo {
               int samplesPerPixel, int[] bitsPerSample, int[] extraSamples,
               int sampleFormat, int flags, boolean bigEndian, long[] tileOffsets, long[] tileByteCounts,
               byte[] jpegTables) {
+            this(index, width, height, tileWidth, tileHeight, compression, photometric, predictor,
+                    samplesPerPixel, bitsPerSample, extraSamples, sampleFormat, flags, bigEndian,
+                    tileOffsets, tileByteCounts, jpegTables, null, null);
+        }
+
+        Level(int index, int width, int height, int tileWidth, int tileHeight,
+              int compression, int photometric, int predictor,
+              int samplesPerPixel, int[] bitsPerSample, int[] extraSamples,
+              int sampleFormat, int flags, boolean bigEndian, long[] tileOffsets, long[] tileByteCounts,
+              byte[] jpegTables, TiffParser.Ifd lazyIfd, ByteSource metaSrc) {
             this.index = index;
             this.width = width;
             this.height = height;
@@ -70,12 +93,17 @@ public final class CogInfo {
             this.tileOffsets = tileOffsets;
             this.tileByteCounts = tileByteCounts;
             this.jpegTables = jpegTables;
+            this.lazyIfd = lazyIfd;
+            this.metaSrc = metaSrc;
+            this.arraysLoaded = lazyIfd == null && tileOffsets != null;
         }
 
         Level withIndex(int i) {
+            boolean loaded = arraysLoaded;
             return new Level(i, width, height, tileWidth, tileHeight, compression, photometric,
                     predictor, samplesPerPixel, bitsPerSample, extraSamples, sampleFormat,
-                    flags, bigEndian, tileOffsets, tileByteCounts, jpegTables);
+                    flags, bigEndian, tileOffsets, tileByteCounts, jpegTables,
+                    loaded ? null : lazyIfd, metaSrc);
         }
 
         public int numXTiles() {
@@ -91,12 +119,55 @@ public final class CogInfo {
             return tx >= 0 && ty >= 0 && tx < numXTiles() && ty < numYTiles();
         }
 
-        public long tileOffset(int tx, int ty) {
+        public long tileOffset(int tx, int ty) throws IOException {
+            ensureTileArrays();
             return tileOffsets[(int) ((long) ty * numXTiles() + tx)];
         }
 
-        public long tileByteCount(int tx, int ty) {
+        public long tileByteCount(int tx, int ty) throws IOException {
+            ensureTileArrays();
             return tileByteCounts[(int) ((long) ty * numXTiles() + tx)];
+        }
+
+        /** TileOffsets table of this level (deferred huge tables load on first call). */
+        public long[] tileOffsets() throws IOException {
+            ensureTileArrays();
+            return tileOffsets;
+        }
+
+        /** TileByteCounts table of this level (deferred huge tables load on first call). */
+        public long[] tileByteCounts() throws IOException {
+            ensureTileArrays();
+            return tileByteCounts;
+        }
+
+        /**
+         * Fetches the deferred TileOffsets/TileByteCounts tables of this level
+         * (lazy per-level parsing); idempotent and thread safe, a no-op when
+         * the tables were loaded eagerly at parse time.
+         */
+        void ensureTileArrays() throws IOException {
+            if (arraysLoaded) {
+                return;
+            }
+            synchronized (this) {
+                if (arraysLoaded) {
+                    return;
+                }
+                lazyIfd.loadDeferred(metaSrc);
+                long[] off = lazyIfd.getLongs(TiffParser.TAG_TILE_OFFSETS);
+                long[] cnt = lazyIfd.getLongs(TiffParser.TAG_TILE_BYTE_COUNTS);
+                long numTiles = (long) numXTiles() * numYTiles();
+                if (off == null || cnt == null || off.length != cnt.length || numTiles > off.length) {
+                    throw new IOException("TileOffsets/TileByteCounts too short for the declared "
+                            + width + "x" + height + " image (" + tileWidth + "x" + tileHeight
+                            + " tiles): " + (off == null ? "?" : off.length) + " entries for "
+                            + numXTiles() + "x" + numYTiles() + " tiles");
+                }
+                tileOffsets = off;
+                tileByteCounts = cnt;
+                arraysLoaded = true;
+            }
         }
     }
 

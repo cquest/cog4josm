@@ -48,6 +48,12 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   COG header-tail (agencement GDAL par défaut : IFD en fin de fichier),
   une seconde requête spéculative couvre les 32 KiB finaux — deux requêtes
   par ouverture dans tous les cas, jamais une par IFD.
+* Tables de tuiles paresseuses par niveau : la table de décalages et de
+  tailles de tuiles d'un niveau dépassant 4 Kio n'est pas lue à
+  l'ouverture mais à la première navigation sur ce niveau — explorer une
+  pyramide profonde en zoom dégrossi ne télécharge jamais les tables
+  pleine résolution (sur un fixture à 5 niveaux : 178 Kio de tables
+  restent côté serveur tant que leurs niveaux ne sont pas utilisés).
 * Cache LRU des **seules métadonnées** (en-tête, IFD, tables de décalages de
   tuiles), validé par taille/ETag et consulté par containment (un bloc plus
   grand sert les lectures plus petites) : une réouverture du même COG ne
@@ -78,6 +84,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Fonctionnalité | État |
 |---|---|
 | Lecture byte-ranges, blocs tête + queue à l'ouverture | ✅ |
+| Tables de tuiles lues paresseusement, par niveau | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |

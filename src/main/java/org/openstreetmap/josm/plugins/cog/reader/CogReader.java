@@ -25,7 +25,11 @@ import java.awt.image.BufferedImage;
  * to the neighbouring display tiles usually costs no request at all. Raw
  * raster bytes are never cached — only the decoded images are. When the
  * plugin attaches a {@link FileMetadataStore}, metadata also survives JOSM
- * restarts: reopening a COG is one conditional request (304, no body).</p>
+ * restarts: reopening a COG is one conditional request (304, no body).
+ * Huge per-level tile tables (offsets/byte counts, see TiffParser) are parsed
+ * lazily: they are fetched on the first tile request of their level, so
+ * browsing a deep pyramid at overview zooms never pays for the
+ * full-resolution tables.</p>
  */
 public final class CogReader implements Closeable {
 
@@ -229,7 +233,8 @@ public final class CogReader implements Closeable {
      * MAX_RING_BYTES} (huge warp windows, coarse grids where the ring
      * covers everything anyway).
      */
-    private int[] ringBounds(int level, CogInfo.Level lvl, int rx0, int rx1, int ry0, int ry1) {
+    private int[] ringBounds(int level, CogInfo.Level lvl, int rx0, int rx1, int ry0, int ry1)
+            throws IOException {
         int cx0 = Math.max(0, rx0 - RING_TILES);
         int cx1 = Math.min(lvl.numXTiles() - 1, rx1 + RING_TILES);
         int cy0 = Math.max(0, ry0 - RING_TILES);
@@ -271,7 +276,7 @@ public final class CogReader implements Closeable {
         }
         CogInfo.Level lvl = info.level(li);
         long total = 0;
-        for (long bc : lvl.tileByteCounts) {
+        for (long bc : lvl.tileByteCounts()) {
             total += Math.min(Math.max(0, bc), maxBytes + 1);
             if (total > maxBytes) {
                 return 0;
