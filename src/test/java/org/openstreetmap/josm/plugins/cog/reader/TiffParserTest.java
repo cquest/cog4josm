@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -303,4 +304,132 @@ class TiffParserTest {
         IOException e = assertThrows(IOException.class, () -> TiffParser.parse(new InMemoryByteSource(file)));
         assertTrue(e.getMessage().contains("tile size"), e.getMessage());
     }
+
+    // --- BigTIFF (magic 43, 64-bit offsets: typical of PIX4Dmatic 3.8 GB COGs) ---
+
+    private static byte[] rawBigTiff(RawEntry... entries) throws IOException {
+        // header: II, 43, offset size 8, constant 0, first IFD at 16
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write('I');
+        out.write('I');
+        w16(out, 43);
+        w16(out, 8);
+        w16(out, 0);
+        w64(out, 16);
+        w64(out, entries.length);
+        long extPos = 16 + 8 + 20L * entries.length + 8;
+        for (RawEntry e : entries) {
+            w16(out, e.tag());
+            w16(out, e.type());
+            w64(out, e.count());
+            if (e.ext() == null) {
+                w64(out, e.value());
+            } else {
+                w64(out, extPos);
+                extPos += e.ext().length;
+            }
+        }
+        w64(out, 0);
+        for (RawEntry e : entries) {
+            if (e.ext() != null) {
+                out.write(e.ext());
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static void w64(ByteArrayOutputStream o, long v) {
+        for (int i = 0; i < 8; i++) {
+            o.write((int) (v >> (8 * i)) & 0xFF);
+        }
+    }
+
+    private static byte[] bigTiffTiled2x2() throws IOException {
+        // 2x2 image, one 2x2 tile (LONG8 offsets/counts stored inline in the
+        // 8-byte value field), tile data and geo double values appended
+        byte[] tile = {10, 20, 30, 40};
+        byte[] file = rawBigTiff(
+                new RawEntry(256, 3, 1, 2, null),
+                new RawEntry(257, 3, 1, 2, null),
+                new RawEntry(258, 3, 1, 8, null),
+                new RawEntry(259, 3, 1, 1, null),
+                new RawEntry(262, 3, 1, 1, null),
+                new RawEntry(277, 3, 1, 1, null),
+                new RawEntry(322, 3, 1, 2, null),
+                new RawEntry(323, 3, 1, 2, null),
+                new RawEntry(324, 16, 1, 0, null), // patched below: inline offset of tile
+                new RawEntry(325, 16, 1, tile.length, null),
+                new RawEntry(33550, 12, 3, 0, leDoubles(1, 1, 0)),
+                new RawEntry(33922, 12, 6, 0, leDoubles(0, 0, 0, 500000, 6250000, 0)));
+        // the tile sits right after the last external value: rewrite the
+        // inline LONG8 offset of tag 324 (entry index 8, value at 16+8+8*20+12)
+        int entry = 16 + 8 + 8 * 20;
+        long tileOff = 16 + 8 + 20L * 12 + 8 + 3 * 8 + 6 * 8;
+        for (int i = 0; i < 8; i++) {
+            file[entry + 12 + i] = (byte) (tileOff >>> (8 * i));
+        }
+        byte[] full = Arrays.copyOf(file, (int) tileOff + tile.length);
+        System.arraycopy(tile, 0, full, (int) tileOff, tile.length);
+        return full;
+    }
+
+    @Test
+    void parsesBigTiffWithInlineLong8Offsets() throws IOException {
+        byte[] file = bigTiffTiled2x2();
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(file));
+        assertEquals(1, ci.levels.size());
+        CogInfo.Level lvl = ci.levels.get(0);
+        assertEquals(2, lvl.width);
+        assertEquals(2, lvl.height);
+        assertEquals(1, lvl.numXTiles());
+        assertEquals(1, lvl.numYTiles());
+        try (CogReader r = CogReader.open(new InMemoryByteSource(file))) {
+            java.awt.image.BufferedImage img = r.getTile(0, 0, 0);
+            assertEquals(2, img.getWidth());
+            // raster samples (getRGB on TYPE_BYTE_GRAY goes through the
+            // default gray ICC profile, the plugin consumers read the raster)
+            assertEquals(10, img.getRaster().getSample(0, 0, 0));
+            assertEquals(40, img.getRaster().getSample(1, 1, 0));
+        }
+    }
+
+    @Test
+    void bigTiffRejectsAbsurdEntryCount() throws IOException {
+        // 64-bit entry count far beyond any plausible IFD: refused on the header
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write('I');
+        out.write('I');
+        w16(out, 43);
+        w16(out, 8);
+        w16(out, 0);
+        w64(out, 16);
+        w64(out, 1L << 40);
+        IOException e = assertThrows(IOException.class,
+                () -> TiffParser.readIfds(new InMemoryByteSource(out.toByteArray()), null));
+        assertTrue(e.getMessage().contains("IFD entries"), e.getMessage());
+    }
+
+    @Test
+    void bigTiffRejectsWrongOffsetSize() throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write('I');
+        out.write('I');
+        w16(out, 43);
+        w16(out, 4);
+        w16(out, 0);
+        w64(out, 16);
+        IOException e = assertThrows(IOException.class,
+                () -> TiffParser.readIfds(new InMemoryByteSource(out.toByteArray()), null));
+        assertTrue(e.getMessage().contains("offset size"), e.getMessage());
+    }
+
+    @Test
+    void bigTiffClampsHostile64BitCount() throws IOException {
+        // DOUBLE tag declaring 2^64-1 values: the fetched data must still bound
+        // the array actually built (one 8-byte value in the file)
+        byte[] file = rawBigTiff(new RawEntry(700, 12, -1L, 0, new byte[8]));
+        List<TiffParser.Ifd> ifds = TiffParser.readIfds(new InMemoryByteSource(file), null);
+        assertEquals(1, ifds.get(0).entry(700).doubles.length);
+    }
+
 }

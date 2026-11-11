@@ -9,9 +9,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Minimal TIFF/GeoTIFF parser for COGs: header, IFD chain,
+ * Minimal TIFF/BigTIFF/GeoTIFF parser for COGs: header, IFD chain,
  * TileOffsets/TileByteCounts arrays, GeoTIFF geographic tags. It reads only the
- * strictly necessary bytes through a {@link ByteSource}.
+ * strictly necessary bytes through a {@link ByteSource}. BigTIFF (magic 43,
+ * 64-bit offsets, 20-byte IFD entries) is read as well as classic TIFF (42).
  */
 public final class TiffParser {
 
@@ -41,7 +42,7 @@ public final class TiffParser {
     public static final int TAG_GDAL_METADATA = 65077;
     public static final int TAG_GDAL_NODATA = 42113;
 
-    private static final int[] TYPE_SIZES = new int[18];
+    private static final int[] TYPE_SIZES = new int[19];
     static {
         TYPE_SIZES[1] = 1;  // BYTE
         TYPE_SIZES[2] = 1;  // ASCII
@@ -56,6 +57,9 @@ public final class TiffParser {
         TYPE_SIZES[11] = 4; // FLOAT
         TYPE_SIZES[12] = 8; // DOUBLE
         TYPE_SIZES[13] = 4; // IFD
+        TYPE_SIZES[16] = 8; // LONG8 (BigTIFF)
+        TYPE_SIZES[17] = 8; // SLONG8 (BigTIFF)
+        TYPE_SIZES[18] = 8; // IFD8 (BigTIFF)
     }
 
     /**
@@ -68,6 +72,13 @@ public final class TiffParser {
      * (tile offset arrays) gets its own request instead of being merged.
      */
     private static final long VALUE_MAX_BLOCK = 4L << 20;
+
+    /**
+     * Upper bound on the number of entries in one IFD: real IFDs hold tens of
+     * tags; a 64-bit entry count (BigTIFF) is attacker-controlled and must not
+     * drive the metadata read size.
+     */
+    private static final long MAX_IFD_ENTRIES = 4096;
 
     /**
      * Maximum supported native tile dimension: keeps decoded rasters bounded
@@ -143,12 +154,13 @@ public final class TiffParser {
 
     private static final class Header {
         boolean bigEndian;
+        boolean bigTiff;
         long firstIfd;
     }
 
     /** Reads the header, then follows the IFD chain (max 32). */
     public static List<Ifd> readIfds(ByteSource src, boolean[] bigEndianOut) throws IOException {
-        byte[] head = src.read(0, 8);
+        byte[] head = src.read(0, 16);
         if (head.length < 8) {
             throw new IOException("File too short to be a TIFF");
         }
@@ -161,13 +173,26 @@ public final class TiffParser {
             throw new IOException("Missing TIFF signature (II/MM)");
         }
         int magic = readU16(head, 2, h.bigEndian);
-        if (magic == 43) {
-            throw new IOException("BigTIFF not supported");
-        }
-        if (magic != 42) {
+        if (magic == 42) {
+            h.firstIfd = Integer.toUnsignedLong(readInt(head, 4, h.bigEndian));
+        } else if (magic == 43) {
+            // BigTIFF: version 43 header is 16 bytes: magic(2) 43(2)
+            // offsetSize(2)=8 constant(2)=0 firstIfd(8)
+            if (head.length < 16) {
+                throw new IOException("Truncated BigTIFF header");
+            }
+            int offsetSize = readU16(head, 4, h.bigEndian);
+            if (offsetSize != 8) {
+                throw new IOException("BigTIFF with offset size " + offsetSize + " (expected 8)");
+            }
+            h.bigTiff = true;
+            h.firstIfd = readLong(head, 8, h.bigEndian);
+            if (h.firstIfd < 16) {
+                throw new IOException("BigTIFF first IFD offset inside the header: " + h.firstIfd);
+            }
+        } else {
             throw new IOException("Unexpected TIFF magic: " + magic);
         }
-        h.firstIfd = Integer.toUnsignedLong(readInt(head, 4, h.bigEndian));
         if (bigEndianOut != null && bigEndianOut.length > 0) {
             bigEndianOut[0] = h.bigEndian;
         }
@@ -175,7 +200,10 @@ public final class TiffParser {
         List<Ifd> ifds = new ArrayList<>();
         long off = h.firstIfd;
         while (off != 0 && ifds.size() < 32) {
-            ifds.add(readIfd(src, off, h.bigEndian));
+            if (off < 0) {
+                throw new IOException("Invalid IFD offset: " + off);
+            }
+            ifds.add(readIfd(src, off, h.bigEndian, h.bigTiff));
             off = ifds.get(ifds.size() - 1).nextIfdOffset;
         }
         if (ifds.isEmpty()) {
@@ -184,15 +212,30 @@ public final class TiffParser {
         return ifds;
     }
 
-    /** IFD header + entry table + next pointer in a single read. */
-    private static Ifd readIfd(ByteSource src, long offset, boolean be) throws IOException {
-        byte[] cnt = src.read(offset, 2);
-        int n = readU16(cnt, 0, be);
-        byte[] block = src.read(offset + 2, n * 12 + 4);
-        byte[] next = block.length >= n * 12 + 4
-                ? Arrays.copyOfRange(block, n * 12, n * 12 + 4)
-                : new byte[4];
-        int usable = Math.min(n, block.length / 12);
+    /**
+     * IFD header + entry table + next pointer in a single read. Classic
+     * entries are 12 bytes with a 4-byte value field; BigTIFF entries are 20
+     * bytes (64-bit counts) with an 8-byte value field, and the entry count
+     * and next-IFD pointers are 64 bits too.
+     */
+    private static Ifd readIfd(ByteSource src, long offset, boolean be, boolean big) throws IOException {
+        int entrySize = big ? 20 : 12;
+        int valueField = big ? 8 : 4;
+        int ptrSize = big ? 8 : 4;
+        byte[] cnt = src.read(offset, big ? 8 : 2);
+        long rawCount = big ? readLong(cnt, 0, be) : readU16(cnt, 0, be);
+        long declared = rawCount < 0 ? Long.MAX_VALUE : rawCount;
+        // a 64-bit entry count is attacker-controlled: refuse absurd values
+        // outright (real IFDs hold tens of entries, never tens of thousands)
+        if (declared > MAX_IFD_ENTRIES) {
+            throw new IOException("Absurd number of IFD entries: " + declared);
+        }
+        int n = (int) declared;
+        byte[] block = src.read(offset + (big ? 8 : 2), n * entrySize + ptrSize);
+        byte[] next = block.length >= n * entrySize + ptrSize
+                ? Arrays.copyOfRange(block, n * entrySize, n * entrySize + ptrSize)
+                : new byte[ptrSize];
+        int usable = Math.min(n, block.length / entrySize);
         int[] tags = new int[usable];
         int[] types = new int[usable];
         long[] counts = new long[usable];
@@ -200,17 +243,30 @@ public final class TiffParser {
         long[] extLen = new long[usable];
         List<long[]> ranges = new ArrayList<>();
         for (int i = 0; i < usable; i++) {
-            int p = i * 12;
+            int p = i * entrySize;
             tags[i] = readU16(block, p, be);
             types[i] = readU16(block, p + 2, be);
-            counts[i] = Integer.toUnsignedLong(readInt(block, p + 4, be));
             if (types[i] <= 0 || types[i] >= TYPE_SIZES.length || TYPE_SIZES[types[i]] == 0) {
                 types[i] = 0;
                 continue;
             }
-            long total = (long) TYPE_SIZES[types[i]] * counts[i];
-            if (total > 4) {
-                extOff[i] = Integer.toUnsignedLong(readInt(block, p + 8, be));
+            int valPos = p + 8;
+            if (big) {
+                long c = readLong(block, p + 4, be);
+                counts[i] = c < 0 ? Long.MAX_VALUE : c;
+                valPos = p + 12;
+            } else {
+                counts[i] = Integer.toUnsignedLong(readInt(block, p + 4, be));
+            }
+            long size = TYPE_SIZES[types[i]];
+            long total = counts[i] > Long.MAX_VALUE / size ? Long.MAX_VALUE : size * counts[i];
+            if (total > valueField) {
+                extOff[i] = big ? readLong(block, valPos, be)
+                        : Integer.toUnsignedLong(readInt(block, valPos, be));
+                if (extOff[i] < 0) {
+                    types[i] = 0;
+                    continue;
+                }
                 extLen[i] = Math.min(total, 1L << 26);
                 ranges.add(new long[]{extOff[i], extLen[i]});
             }
@@ -229,14 +285,18 @@ public final class TiffParser {
                 continue;
             }
             byte[] data;
-            if ((long) TYPE_SIZES[types[i]] * counts[i] <= 4) {
-                data = Arrays.copyOfRange(block, i * 12 + 8, i * 12 + 12);
+            long size = TYPE_SIZES[types[i]];
+            long total = counts[i] > Long.MAX_VALUE / size ? Long.MAX_VALUE : size * counts[i];
+            if (total <= valueField) {
+                int p = i * entrySize + (big ? 12 : 8);
+                data = Arrays.copyOfRange(block, p, Math.min(p + valueField, block.length));
             } else {
                 data = sliceFetched(blockData, blocks, extOff[i], (int) extLen[i], src);
             }
             entries.put(tags[i], decodeValue(types[i], counts[i], data, be));
         }
-        return new Ifd(offset, Integer.toUnsignedLong(readInt(next, 0, be)), entries);
+        long nextIfd = big ? readLong(next, 0, be) : Integer.toUnsignedLong(readInt(next, 0, be));
+        return new Ifd(offset, nextIfd, entries);
     }
 
     /** Extracts one value from its pre-fetched merged block (fallback: direct read). */
@@ -301,6 +361,15 @@ public final class TiffParser {
                 long[] v = new long[n];
                 for (int i = 0; i < v.length; i++) {
                     v[i] = readInt(data, Math.min(4 * i, data.length - 4), be);
+                }
+                return new IfdEntry(type, count, v, null, null);
+            }
+            case 16: // LONG8 (BigTIFF)
+            case 17: // SLONG8 (BigTIFF)
+            case 18: { // IFD8: same 8 bytes, offsets either way
+                long[] v = new long[n];
+                for (int i = 0; i < v.length; i++) {
+                    v[i] = readLong(data, Math.min(8 * i, data.length - 8), be);
                 }
                 return new IfdEntry(type, count, v, null, null);
             }
@@ -567,6 +636,17 @@ public final class TiffParser {
         int v = 0;
         for (int i = 0; i < 4; i++) {
             v = (v << 8) | (b[be ? off + i : off + 3 - i] & 0xFF);
+        }
+        return v;
+    }
+
+    private static long readLong(byte[] b, int off, boolean be) {
+        if (off < 0 || off + 8 > b.length) {
+            return 0;
+        }
+        long v = 0;
+        for (int i = 0; i < 8; i++) {
+            v = (v << 8) | (b[be ? off + i : off + 7 - i] & 0xFFL);
         }
         return v;
     }
