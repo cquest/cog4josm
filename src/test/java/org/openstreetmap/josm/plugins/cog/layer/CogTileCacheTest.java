@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -209,6 +210,12 @@ class CogTileCacheTest {
         new CogTileLoaderJob(loader, blank).run();
         assertTrue(blank.isLoaded());
         assertFalse(blank.hasError());
+        // JOSM paints loaded tiles without an image as the hourglass pattern
+        // ("unfinished"): the loader must provide a transparent image instead
+        assertNotNull(blank.getImage(), "no image would paint the hourglass");
+        assertTrue(CogTileLoaderJob.isBlank(blank.getImage()), "fully transparent outside the COG");
+        assertEquals(256, blank.getImage().getWidth());
+        assertEquals(256, blank.getImage().getHeight());
         assertTrue(backing.isEmpty(), "tiles that miss the COG are not worth caching");
     }
 
@@ -248,5 +255,72 @@ class CogTileCacheTest {
         new CogTileLoaderJob(loader, tile).run();
         assertTrue(tile.isLoaded());
         assertFalse(tile.hasError());
+    }
+
+    // ------------------------------------------------- tile ranges clamped to the COG
+
+    @Test
+    void tileRangesCoverTheCogOnly() throws IOException {
+        CogTileSource source = fixture3857().source();
+        int[] pos = tileCoveringCogCentre(source);
+        assertTrue(pos[1] >= source.getTileXMin(12) && pos[1] <= source.getTileXMax(12), "covering column in range");
+        assertTrue(pos[2] >= source.getTileYMin(12) && pos[2] <= source.getTileYMax(12), "covering row in range");
+        // far tiles (~290 km south-east at z12): fully excluded, JOSM will not
+        // even create them (TileSet.sanitize clamps the visible range with
+        // these accessors) - no loader job, no hourglass
+        assertTrue(pos[1] + 30 > source.getTileXMax(12), "east tile excluded");
+        assertTrue(pos[2] + 30 > source.getTileYMax(12), "south tile excluded");
+        // zoom 0: the world is a single tile; sane and clamped at every zoom
+        assertEquals(0, source.getTileXMin(0));
+        assertEquals(0, source.getTileXMax(0));
+        assertEquals(0, source.getTileYMin(0));
+        assertEquals(0, source.getTileYMax(0));
+        for (int z = 0; z <= 24; z++) {
+            long n = 1L << z;
+            assertTrue(source.getTileXMin(z) <= source.getTileXMax(z), "columns not empty at z" + z);
+            assertTrue(source.getTileYMin(z) <= source.getTileYMax(z), "rows not empty at z" + z);
+            assertTrue(source.getTileXMin(z) >= 0 && source.getTileXMax(z) < n, "columns clamped at z" + z);
+            assertTrue(source.getTileYMin(z) >= 0 && source.getTileYMax(z) < n, "rows clamped at z" + z);
+        }
+    }
+
+    @Test
+    void tileRangesCoverWarpedCogToo() throws IOException {
+        // custom LCC (Lambert-93 parameters, see CogCustomWarpTest): the
+        // coverage bbox goes through the projection (boundary sampling,
+        // widened by one tile on each side)
+        double[] d = new double[9];
+        int[] keys = TestTiffWriter.customKeysLcc(d);
+        byte[] tiff = TestTiffWriter.write(
+                List.of(new TestTiffWriter.LevelSpec(64, 48, 8, 1, 8, false)),
+                32767, keys, d, 100.0, 700_000.0, 6_600_000.0);
+        CogReader reader = CogReader.open(new InMemoryByteSource(tiff));
+        CogTileSource source = new CogTileSource(
+                new ImageryInfo("warp range test", "http://localhost/warp-range.tif"), reader);
+        assertNotNull(source.getProjection());
+        // model centre of the 64x48 COG of 100-unit pixels
+        double[] centre = source.getProjection().unproject(703_200.0, 6_597_600.0);
+        TileXY inside = source.latLonToTileXY(centre[0], centre[1], 12);
+        assertTrue(inside.getXIndex() >= source.getTileXMin(12) && inside.getXIndex() <= source.getTileXMax(12),
+                "centre column in range");
+        assertTrue(inside.getYIndex() >= source.getTileYMin(12) && inside.getYIndex() <= source.getTileYMax(12),
+                "centre row in range");
+        // ~400 km east in the projection plane: excluded
+        double[] far = source.getProjection().unproject(1_103_200.0, 6_597_600.0);
+        TileXY farTile = source.latLonToTileXY(far[0], far[1], 12);
+        assertTrue(farTile.getXIndex() > source.getTileXMax(12), "far east tile excluded");
+        for (int z = 0; z <= 24; z++) {
+            assertTrue(source.getTileXMin(z) <= source.getTileXMax(z), "columns not empty at z" + z);
+            assertTrue(source.getTileYMin(z) <= source.getTileYMax(z), "rows not empty at z" + z);
+        }
+    }
+
+    @Test
+    void blankTilesAreSharedAndTransparent() {
+        BufferedImage a = CogTileLoaderJob.blankTile(256);
+        assertSame(a, CogTileLoaderJob.blankTile(256), "one shared instance per size");
+        assertEquals(256, a.getWidth());
+        assertEquals(0, a.getRGB(0, 0) >>> 24, "fully transparent");
+        assertTrue(CogTileLoaderJob.isBlank(a));
     }
 }

@@ -6,6 +6,8 @@ never downloaded, only the needed TIFF tiles are fetched.
 
 ## New in 0.5.0 (phase 3)
 
+Add transparency on near-black pixels in JPEG which do not support ahpla channel.
+
 - **Black-to-alpha transparency** for sources whose pixels are RGB (or
   JPEG YCbCr) **without an alpha channel**: near-black pixels are rendered
   fully transparent instead of as a black mask. Grey sources and sources
@@ -21,6 +23,11 @@ never downloaded, only the needed TIFF tiles are fetched.
 - Switching the policy is free of network cost: each policy keeps its own
   decoded tiles, and the policy name is part of the tile cache keys, so
   composed tiles from another policy are never served.
+- **No hourglass outside the coverage**: where the COG has no imagery the
+  map now stays clean instead of showing JOSM's "no image" hourglass
+  pattern. Tiles beyond the COG's extent are never created (the tile
+  grid is clamped to the extent at every zoom), and edge tiles that
+  compose to nothing are painted with a shared transparent image.
 
 ## Guarantees unchanged from 0.4.0
 
@@ -57,6 +64,8 @@ sont lues.
 
 ## Nouveautés de la 0.5.0 (phase 3)
 
+Ajout de la transparence des pixels quasi noirs dans les JPEG qui n'ont pas de canal alpha.
+
 - **Transparence noir → alpha** pour les sources dont les pixels sont
   RGB (ou JPEG YCbCr) **sans canal alpha** : les pixels quasi noirs
   deviennent entièrement transparents au lieu de former un masque noir.
@@ -76,6 +85,12 @@ sont lues.
   ses propres tuiles décodées, et son nom entre dans les clés du cache
   de tuiles — les tuiles composées d'une autre politique ne resservent
   jamais.
+- **Pas de sablier hors de la couverture** : là où le COG n'a pas
+  d'image, la carte reste propre au lieu d'afficher le motif sablier
+  « pas d'image » de JOSM. Les tuiles au-delà de l'emprise du COG ne
+  sont même pas créées (la grille de tuiles est bornée par l'emprise à
+  chaque zoom), et les tuiles de bord qui ne composent rien sont
+  peintes avec une image transparente partagée.
 
 ## Garanties inchangées depuis la 0.4.0
 

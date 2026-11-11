@@ -299,7 +299,7 @@ public final class TestTiffWriter {
      * (codes 32767), written the way GDAL >= 3 would produce it: DOUBLE keys
      * referenced in tag 34736. Returns {keys, doubles, originAnchorOk}.
      */
-    static int[] customKeysLcc(double[] doublesOutHolder) {
+    public static int[] customKeysLcc(double[] doublesOutHolder) {
         return customKeysLcc(doublesOutHolder, 32767, 32767);
     }
 

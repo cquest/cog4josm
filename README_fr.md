@@ -81,6 +81,10 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   préférence `cog.transparency` (`black_near` / `metadata` / `none`).
   Les sources en niveaux de gris ou portant déjà un alpha ne sont jamais
   touchées.
+* Carte propre hors couverture : les tuiles au-delà de l'emprise du COG ne
+  sont même pas créées (la grille de tuiles est bornée par l'emprise), et
+  les tuiles de bord qui ne composent rien reçoivent une image
+  transparente au lieu du motif sablier « pas d'image » de JOSM.
 * Dépendances minimales : **JDK + API JOSM uniquement**. Le jar du plugin
   ne contient aucun code tiers (GPL v2+ pure). Les paramètres des CRS
   viennent toujours du fichier lui-même (GeoKeys) ou de la table de
@@ -95,6 +99,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Lecture byte-ranges, blocs tête + queue à l'ouverture | ✅ |
 | Tables de tuiles lues paresseusement, par niveau | ✅ |
 | Transparence noir → alpha (sources RGB sans alpha) | ✅ (phase 3) |
+| Pas de sablier hors de la couverture du COG | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |

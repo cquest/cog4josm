@@ -612,5 +612,25 @@ preference (default `black_near`, read at layer creation) and calls
 LevelSpec gained `checker` (4 px black/red blocks) and `noData` (writes
 42113 ASCII); `/black.tif` is the end-to-end RGB checker COG.
 
+Phase 3 follow-up (done): no hourglass outside the COG coverage. JOSM
+paints a tile that is loaded and error-free but has `getImage() == null`
+with its "no image" hourglass pattern (`paintTileImages` counts it
+"unfinished", then auto-zoom retries `tryLoadFromDifferentZoom`):
+`CogComposer.compose` returning null (tile bbox missing the COG extent)
+used to produce exactly that state. Two mechanisms now: (1) the tile
+ranges `getTileXMin/getTileXMax/getTileYMin/getTileYMax` of
+`CogTileSource` clamp the visible tile set (`TileSet.sanitize` applies
+them): the COG extent is converted to Web Mercator metres once at
+source construction - exact for 3857 and geographic degrees, boundary
+sampling through the projection (+1 tile slack) in warp mode; null
+(unusable) falls back to the world grid - so tiles fully outside the
+COG are never created, no loader job at all; (2) `CogTileLoaderJob`
+still covers border/degenerate misses: when compose returns null the
+tile gets a shared fully transparent image (one instance per size,
+`blankTile`), never JCS-cached (a miss recomposes for free, the extent
+test needs no request). Tests: ranges (3857 fixture + custom-LCC warp
+fixture), blank tile transparent/shared, `blankTileIsNotCached`
+extended.
+
 Final Phase : publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

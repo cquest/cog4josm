@@ -74,6 +74,10 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   menu ("Transparency of black pixels"), or globally with the
   `cog.transparency` preference (`black_near` / `metadata` / `none`).
   Grey and alpha-carrying sources are never touched.
+* Clean map outside the coverage: tiles beyond the COG's extent are never
+  even created (the tile grid is clamped to the extent), and edge tiles
+  that compose to nothing get a transparent image instead of JOSM's
+  "no image" hourglass pattern.
 * Minimal dependencies: **JDK + JOSM API only**. The plugin jar contains no
   third-party code (GPL v2+ only). CRS parameters always come from the file
   itself (GeoKeys) or from the projection table shipped by JOSM — the
@@ -87,6 +91,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Byte-range reads, head + tail blocks at open (no probe) | ✅ |
 | Tile tables fetched lazily, per level, on first use | ✅ |
 | Black-to-alpha transparency (RGB sources without alpha) | ✅ (phase 3) |
+| No hourglass outside the COG coverage | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Speculative tile ring + base overview prefetch | ✅ |
 | Persistent metadata + conditional GET (304 on reopen) | ✅ |

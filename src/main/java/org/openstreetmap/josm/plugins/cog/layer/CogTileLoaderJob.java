@@ -1,5 +1,7 @@
 package org.openstreetmap.josm.plugins.cog.layer;
 
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.commons.jcs3.access.behavior.ICacheAccess;
@@ -107,6 +109,16 @@ final class CogTileLoaderJob implements TileJob {
                 if (cacheKey != null && !isBlank(img)) {
                     storeCachedTile(cache, cacheKey, img);
                 }
+            } else {
+                // The tile misses the COG (outside its extent, or a window
+                // degenerate at the border). A loaded tile with getImage() ==
+                // null counts as "unfinished" in JOSM paintTileImages: it gets
+                // the hourglass pattern, and auto-zoom even retries loading it
+                // at other zoom levels. Hand it a shared transparent image
+                // instead: nothing is painted, no retry. Never cached - a miss
+                // recomposes for free (the extent test in CogComposer needs
+                // no byte-range request).
+                tile.setImage(blankTile(size));
             }
             tile.setLoaded(true);
             success = true;
@@ -156,5 +168,17 @@ final class CogTileLoaderJob implements TileJob {
             }
         }
         return true;
+    }
+
+    /**
+     * Fully transparent tiles, one shared instance per size (a Tile only
+     * holds a reference, and JOSM never paints into the image it is given -
+     * filters copy). Painted in place of the hourglass pattern where the
+     * COG has no imagery (see {@link #run}).
+     */
+    private static final ConcurrentMap<Integer, BufferedImage> BLANK_TILES = new ConcurrentHashMap<>();
+
+    static BufferedImage blankTile(int size) {
+        return BLANK_TILES.computeIfAbsent(size, s -> new BufferedImage(s, s, BufferedImage.TYPE_INT_ARGB));
     }
 }

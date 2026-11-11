@@ -48,6 +48,23 @@ public class CogTileSource extends AbstractTMSTileSource {
     private volatile Projection projection;
     /** Error message when the COG's custom system could not be resolved (null otherwise). */
     private volatile String crsError;
+    /**
+     * Coverage of the COG in Web Mercator metres: {west, south, east, north},
+     * computed once at construction. Null when it cannot be established
+     * (unusable CRS, non-finite extent, extent crossing the antimeridian):
+     * the tile ranges then keep the world grid. {@link #getTileXMin} &hellip;
+     * {@link #getTileYMax} clamp every visible tile set to this coverage, so
+     * tiles outside the COG are never even created (no loader job, no
+     * JOSM "no image" hourglass).
+     */
+    private final double[] coverageMetres;
+    /**
+     * Widens the tile ranges by this many tiles when the coverage went
+     * through a nonlinear projection (warp mode): its extent bbox is then an
+     * approximation - err on the side of including tiles (an extra tile
+     * composes transparent, a wrongly excluded one would hide imagery).
+     */
+    private final int coverageSlack;
 
     public CogTileSource(ImageryInfo info, CogReader reader) {
         super(info);
@@ -67,6 +84,8 @@ public class CogTileSource extends AbstractTMSTileSource {
                 crsError = crsErrorReason();
             }
         }
+        this.coverageMetres = computeCoverageMetres();
+        this.coverageSlack = projection != null && !isGeographicDegrees() ? 1 : 0;
     }
 
     /** Reason why resolving the system failed (for the error message). */
@@ -241,24 +260,125 @@ public class CogTileSource extends AbstractTMSTileSource {
 
     // ------------------------------------------------------------ tiles
 
+    /** Number of world tiles per axis at a zoom (world = 360 degrees). */
+    private double worldTiles(int zoom) {
+        return mercator.getMaxPixels(zoom) / (double) getTileSize();
+    }
+
+    /**
+     * Tile column of a Mercator easting, clamped to the world grid and
+     * widened by {@link #coverageSlack} ({@code first}: left edge of the
+     * coverage, else right edge).
+     */
+    private int columnAt(double metresEast, int zoom, boolean first) {
+        double n = worldTiles(zoom);
+        double f = (metresEast + MercatorTiles.HALF_CIRCUMFERENCE)
+                / (2 * MercatorTiles.HALF_CIRCUMFERENCE) * n;
+        long v = first ? (long) Math.floor(f) - coverageSlack : (long) Math.floor(f) + coverageSlack;
+        return (int) Math.max(0, Math.min((long) n - 1, v));
+    }
+
+    /** Tile row of a Mercator northing (rows run north to south), same rules. */
+    private int rowAt(double metresNorth, int zoom, boolean first) {
+        double n = worldTiles(zoom);
+        double f = (MercatorTiles.HALF_CIRCUMFERENCE - metresNorth)
+                / (2 * MercatorTiles.HALF_CIRCUMFERENCE) * n;
+        long v = first ? (long) Math.floor(f) - coverageSlack : (long) Math.floor(f) + coverageSlack;
+        return (int) Math.max(0, Math.min((long) n - 1, v));
+    }
+
+    /**
+     * The COG extent converted to Web Mercator metres (see
+     * {@link #coverageMetres}): exact for EPSG:3857 (linear) and geographic
+     * degrees sources (the tile grid maps lon/lat linearly into the world
+     * square), approximated by sampling the extent boundary through the
+     * projection in warp mode. Null when unusable.
+     */
+    private double[] computeCoverageMetres() {
+        double minLon;
+        double minLat;
+        double maxLon;
+        double maxLat;
+        if (isGeographicDegrees()) {
+            minLon = cogInfo.extentMinX();
+            maxLon = cogInfo.extentMaxX();
+            minLat = cogInfo.extentMinY();
+            maxLat = cogInfo.extentMaxY();
+        } else if (cogInfo.crsCode == 3857) {
+            minLon = MercatorTiles.xToLon(cogInfo.extentMinX());
+            maxLon = MercatorTiles.xToLon(cogInfo.extentMaxX());
+            minLat = MercatorTiles.yToLat(cogInfo.extentMinY());
+            maxLat = MercatorTiles.yToLat(cogInfo.extentMaxY());
+        } else if (projection != null) {
+            // extremes of a projected rectangle sit along its edges, not only
+            // at its corners: sample the boundary
+            double ex0 = cogInfo.extentMinX();
+            double ex1 = cogInfo.extentMaxX();
+            double ey0 = cogInfo.extentMinY();
+            double ey1 = cogInfo.extentMaxY();
+            minLon = minLat = Double.POSITIVE_INFINITY;
+            maxLon = maxLat = Double.NEGATIVE_INFINITY;
+            try {
+                final int steps = 16;
+                for (int i = 0; i <= steps; i++) {
+                    double fx = i / (double) steps;
+                    for (double[] ll : new double[][] {
+                            projection.unproject(ex0 + fx * (ex1 - ex0), ey0),
+                            projection.unproject(ex0 + fx * (ex1 - ex0), ey1),
+                            projection.unproject(ex0, ey0 + fx * (ey1 - ey0)),
+                            projection.unproject(ex1, ey0 + fx * (ey1 - ey0)),
+                    }) {
+                        // unproject returns {lat, lon}
+                        minLat = Math.min(minLat, ll[0]);
+                        maxLat = Math.max(maxLat, ll[0]);
+                        minLon = Math.min(minLon, ll[1]);
+                        maxLon = Math.max(maxLon, ll[1]);
+                    }
+                }
+            } catch (RuntimeException e) {
+                // samples leaving the projection domain: keep the world grid
+                return null;
+            }
+        } else {
+            return null; // unusable CRS: tile jobs report the error anyway
+        }
+        if (!(Double.isFinite(minLon) && Double.isFinite(minLat)
+                && Double.isFinite(maxLon) && Double.isFinite(maxLat))
+                || minLon > maxLon || minLat > maxLat || maxLon - minLon > 360.0) {
+            return null; // invalid extent or crossing the antimeridian
+        }
+        return new double[] {
+                MercatorTiles.lonToX(Math.max(-180.0, Math.min(180.0, minLon))),
+                MercatorTiles.latToY(Math.max(-90.0, Math.min(90.0, minLat))),
+                MercatorTiles.lonToX(Math.max(-180.0, Math.min(180.0, maxLon))),
+                MercatorTiles.latToY(Math.max(-90.0, Math.min(90.0, maxLat))),
+        };
+    }
+
     @Override
     public int getTileXMin(int zoom) {
-        return 0;
+        return coverageMetres == null ? 0 : columnAt(coverageMetres[0], zoom, true);
     }
 
     @Override
     public int getTileXMax(int zoom) {
-        return (int) Math.max(0, Math.ceil(mercator.getMaxPixels(zoom) / (double) getTileSize()) - 1);
+        if (coverageMetres == null) {
+            return (int) Math.max(0, Math.ceil(worldTiles(zoom)) - 1);
+        }
+        return columnAt(coverageMetres[2], zoom, false);
     }
 
     @Override
     public int getTileYMin(int zoom) {
-        return 0;
+        return coverageMetres == null ? 0 : rowAt(coverageMetres[3], zoom, true);
     }
 
     @Override
     public int getTileYMax(int zoom) {
-        return getTileXMax(zoom);
+        if (coverageMetres == null) {
+            return getTileXMax(zoom);
+        }
+        return rowAt(coverageMetres[1], zoom, false);
     }
 
     @Override
