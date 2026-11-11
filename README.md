@@ -31,7 +31,8 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   validated by size/ETag: reopening the same COG costs a single probe
   request. Raster content is never cached as raw bytes (only as decoded
   images).
-* No external dependency: JDK and JOSM API only.
+* Minimal dependencies: JDK, JOSM API, plus the embedded proj4j core in the
+  jar (Apache-2.0, used only for GeoKeys-driven reprojection).
 
 ## Status (v0.1)
 
@@ -48,6 +49,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Working JOSM layer (Imagery menu) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
 | "Custom" GeoKeys (unregistered CRS, written by GDAL) | ✅ |
+| Extra CRS models via proj4j fallback (Albers…) | ✅ (phase 2.2) |
 | STAC panel (Panoramax) | ⏳ phase 3 |
 
 ## Supported coordinate systems
@@ -68,6 +70,12 @@ when they match a known model:
 |---|---|
 | 1 | Transverse Mercator (free ellipsoid and parameters) |
 | 8 | Lambert conformal conic 1SP/2SP |
+| 10 | Lambert azimuthal equal area (proj4j fallback) |
+| 11 | Albers equal area conic (proj4j fallback) |
+| 14 | Oblique Stereographic (no standard parallels 3078/3079) |
+| 15 | Polar Stereographic (pole from the sign of GeoKey 3081) |
+| 28 | Cylindrical equal area (proj4j fallback) |
+| 9815 | Oblique Mercator, Swiss form (GeoKeys 3094 = 3096 = 90) |
 | — | Geodetic (geographic), ellipsoid + prime meridian |
 
 An EPSG code not listed above but **accompanied by its GeoKeys parameters**
@@ -75,14 +83,19 @@ An EPSG code not listed above but **accompanied by its GeoKeys parameters**
 recognized by the same mechanism: the plugin falls back on the declared
 parameters.
 
-Any other method (Albers 11, oblique Mercator…), non-degree angular unit
-or missing parameter is **rejected with an explicit error message** —
-never silently reprojected.
+Any other method (equidistant conic 13, Mercator with standard parallel 7,
+polyconic 22, orthographic 21, general oblique Mercator), a sphere
+(1/f = 0), non-degree angular unit or missing parameter is **rejected with
+an explicit error message** — never silently reprojected. The proj4j
+fallback only covers models measured to agree with PROJ within a
+millimetre; where its formulas drift, the method stays rejected.
 
 Projections are computed in-house (Snyder series, sub-millimetric forward
-accuracy, validated against GDAL/PROJ). Non-WGS84 datums (NTF, SAD69…) are
-treated as WGS84: possible offset of the order of a hundred meters,
-acceptable for a map background.
+accuracy, validated against GDAL/PROJ) or, for the models out of that
+scope, through the embedded proj4j library — restricted to the subset
+verified against PROJ anchors in the unit tests. Non-WGS84 datums (NTF,
+SAD69…) are treated as WGS84: possible offset of the order of a hundred
+meters, acceptable for a map background.
 
 ## Building
 
@@ -133,4 +146,6 @@ GeoTIFF SRID, and can decode one tile to PNG.
 
 ## License
 
-GPL v2 or later (like JOSM).
+GPL v2 or later (like JOSM). The plugin jar embeds the proj4j core
+(Apache-2.0, used only for GeoKeys parameters — never an EPSG database);
+its license text ships inside `cog.jar` as `META-INF/LICENSE-proj4j.txt`.

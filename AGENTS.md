@@ -9,8 +9,13 @@ layers, using HTTP byte-range reads only.
   `ByteSource`/`HttpRangeReader` (`Range:` requests). A server that does not
   support ranges must be rejected (`RangeNotSupportedException`).
 - **No server proxy**: the plugin talks directly to the tile server.
-- **No external dependency**: JDK + JOSM API only (`lib/josm-tested.jar`,
-  provided by `./fetch-josm.sh`). No GDAL, no TIFF/JPEG library at runtime.
+- **No external dependency** (relaxed for phase 2.2, user arbitration): JDK +
+  JOSM API + proj4j core (`org.locationtech.proj4j:proj4j`, Apache-2.0,
+  classes embedded into `cog.jar` by the `jar` task). No GDAL, no TIFF/JPEG
+  library at runtime. NEVER add `proj4j-epsg`: its bundled EPSG database has
+  restrictive terms (Apache CALCITE-5399) and CRS parameters must keep coming
+  from the file's GeoKeys, not from an EPSG lookup. The upstream license text
+  is shipped in the jar (`lib/proj4j-LICENSE.txt` → `META-INF/LICENSE-proj4j.txt`).
 - License **GPL v2+** (like JOSM); do not add files under an incompatible
   license. No per-file license header (a root `LICENSE` is enough, follow the
   existing files).
@@ -19,9 +24,12 @@ layers, using HTTP byte-range reads only.
   UTM 32601-32660 / 32701-32760, Lambert-93 2154); since phase 2.1 also
   **custom GeoKeys (32767)** whose parameters describe a known model
   (geographic, Transverse Mercator, Lambert conformal conic 1SP/2SP — see
-  `Crs.fromCustom`). Any other CRS or method must raise an explicit error (no
-  silent reprojection, no SRID guessing). No PROJ.4/WKT parsing: only GeoTIFF
-  keys are read (assumed trade-off, phase 2.2 = proj4j).
+  `Crs.fromCustom`); since phase 2.2 also a verified subset of other models
+  through the proj4j fallback (`crs/Proj4Backend`: Albers, LAEA, CEA,
+  stereographic incl. polar, somerc 90/90). Any other CRS or method must
+  raise an explicit error (no silent reprojection, no SRID guessing). No
+  PROJ.4/WKT parsing from files: only GeoTIFF keys are read — they feed
+  proj4j, which never consults an EPSG database.
 
 ## Language and style
 
@@ -185,8 +193,9 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
 - **3074/3075 reconciliation**: GeoKey 3074 (ProjCoordTrans) = 32767 with
   GDAL; the real method code is in 3075. The values TM=1 and LCC2SP=8 are
   shared between both tables; only the Lambert 1SP codes differ (3074=9 vs
-  3075=14). Albers (3075=11) is NOT supported: it must be rejected
-  explicitly (fixture `custom_albers_cog.tif`).
+  3075=14). Albers (3075=11) went through the proj4j fallback since phase
+  2.2 (fixture `custom_albers_cog.tif` is an acceptance case, see
+  `Proj4BackendTest`).
 - **PROJ convention for the Lambert scale factor**: GeoKey 3092 (k0) missing
   means 1.0; when present, PROJ applies it to the WHOLE rho radius (not only
   rho0), so (lat0,lon0) falls exactly on (FE,FN) and the local scale at lat0
@@ -217,6 +226,42 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   (otherwise 2 missing IFD entries, a 24-byte shift of the whole geographic
   block).
 
+## Proj4j fallback pitfalls (phase 2.2, measured empirically)
+
+- **Dual 3075 code tables**: libgeotiff and GDAL custom mode do not use the
+  same method codes in 3075: tmerc=1, merc=7, lcc2sp=8, laea=10, aea=11,
+  eqdc=13, stere=14, polar=15, ortho=21, poly=22, cea=28, Hotine/somerc=9815.
+  Value 14 collides with libgeotiff's Lambert 1SP: disambiguate by the
+  presence of standard parallels 3078/3079 (present -> Lambert 1SP in-house
+  class; absent -> oblique stereographic through the fallback).
+- **Natural origin keys**: GDAL stores the azimuthal/stereographic centre in
+  3088 (longitude) / 3089 (latitude), the Hotine scale in 3093 (vs 3092
+  elsewhere), the polar centre longitude in 3095, the Hotine azimuth and
+  rectified-grid angle in 3094/3096. FE/FN stay in 3082/3083 (the
+  3084-3087 false-origin group is an accepted fallback).
+- **proj4j parses `+rf`/`+f` wrong** (the ellipsoid is corrupted: b ends up
+  ~1.9e9 m): always pass `+a=`/`+b=` computed from the plugin's own
+  `Ellipsoid`. The `+ellps=` name table also differs from PROJ's (e.g.
+  `clrk80ign` is absent there): never use it.
+- **Number formatting**: BigDecimal.toPlainString — an "E+" token breaks
+  proj4j's parameter parser.
+- **Spheres**: proj4j forward is exact on 1/f=0 but the aea INVERSE drifts
+  by whole degrees against PROJ -> the backend rejects spheres outright.
+- **Accuracy policy is empirical**: the subset routed to proj4j (aea 11,
+  laea 10, cea 28, stere k-form 14, polar 15, somerc with 3094=3096=90) was
+  measured to agree with gdaltransform within a millimetre; eqdc 13,
+  merc+lat_ts 7, poly 22, ortho 21, stere via lat_ts and the general Hotine
+  drift (metres to kilometres) and stay rejected. Never widen the table
+  without re-measuring gdaltransform anchors (they are embedded in
+  `Proj4BackendTest`).
+- **Polar stereographic (3075=15)**: the GeoKeys do not store the natural
+  origin latitude — it is the pole, whose sign follows the sign of 3081
+  (3081 = 0 -> rejected, the pole is unknown); a 3092 scale different from 1
+  combined with lat_ts is unverified -> rejected.
+- proj4j `Projection` objects are stateful: `Proj4Projection` synchronizes
+  project/unproject for concurrent tile workers; transform failures return
+  NaN, never throw.
+
 ## Reference COG example
 
 `cog-paris-3857.tif` (root, 1.4 MB, EPSG:3857) and `cog-paris-l93.tif`
@@ -240,7 +285,8 @@ external tables); rasterio COGs (tables in the stream) are also accepted.
 
 `custom_lcc_cog.tif`, `custom_tmerc_cog.tif`, `custom_longlat_cog.tif`
 (root, generated by GDAL, hence realistic GeoKeys 32767 + 34736 doubles) and
-`custom_albers_cog.tif` (method 3075=11, must be **rejected**). GDAL
+`custom_albers_cog.tif` (method 3075=11, accepted since phase 2.2 via the
+proj4j fallback — the E2E acceptance case). GDAL
 reference anchors in `CogCustomWarpTest`/`CustomCrsTest`. Regeneration:
 
 ```sh
@@ -280,8 +326,11 @@ Phase 2 (done): per-tile reprojection (UTM, Lambert-93) through the in-house
 `crs/` formulas (no full PRJ).
 Phase 2.1 (done): custom GeoKeys 32767 mapped onto the existing `crs/`
 classes (`Crs.fromCustom`), no new projection math.
-Phase 2.2 (considered): proj4j backend for models not covered (Albers,
-oblique Mercator, non-WGS84 datums…) — it would break the "no dependency"
-constraint, to be arbitrated.
+Phase 2.2 (done): proj4j fallback (`crs/Proj4Backend`) for models missing
+from the in-house `crs/` classes — Albers, LAEA, CEA, stereographic (incl.
+polar), somerc 90/90 — parameters always taken from the file's GeoKeys (no
+EPSG lookup). Only the empirically verified subset is routed there; the
+"no dependency" constraint was relaxed by user arbitration, `proj4j-epsg`
+stays forbidden (restrictive EPSG terms).
 Phase 3: publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

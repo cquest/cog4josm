@@ -32,7 +32,8 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
   qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
   octets bruts (seulement en images décodées).
-* Pas de dépendance externe : uniquement le JDK et l'API JOSM.
+* Dépendances minimales : JDK, API JOSM, plus le cœur proj4j intégré au
+  jar (Apache-2.0, utilisé uniquement pour la reprojection via GeoKeys).
 
 ## État (v0.1)
 
@@ -49,6 +50,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Couche JOSM fonctionnelle (menu Imagery) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
 | GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
+| Modèles de projection supplémentaires via repli proj4j (Albers…) | ✅ (phase 2.2) |
 | Panneau STAC (Panoramax) | ⏳ phase 3 |
 
 ## Systèmes de coordonnées pris en charge
@@ -69,6 +71,12 @@ ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 |---|---|
 | 1 | Transverse de Mercator (ellipsoïde et paramètres libres) |
 | 8 | Conique conforme de Lambert 1SP/2SP |
+| 10 | Conique équivalente de Lambert (repli proj4j) |
+| 11 | Conique équivalente d'Albers (repli proj4j) |
+| 14 | Stéréographique oblique (sans parallèles étalons 3078/3079) |
+| 15 | Stéréographique polaire (pôle déduit du signe du GeoKey 3081) |
+| 28 | Cylindrique équivalente (repli proj4j) |
+| 9815 | Mercator oblique, forme suisse (GeoKeys 3094 = 3096 = 90) |
 | — | Systématique (géographique), ellipsoïde + premier méridien |
 
 Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
@@ -76,14 +84,20 @@ GeoKeys** (cas des exports PIX4Dmatic vers Lambert-43/EPSG:3943, par
 exemple) est reconnu par le même mécanisme : le plugin retombe sur les
 paramètres déclarés.
 
-Tout autre méthode (Albers 11, Mercator oblique…), unité angulaire non
-degré ou paramètre manquant est **refusé avec un message d'erreur
-explicite** — jamais reprojeté silencieusement.
+Toute autre méthode (conique équidistante 13, Mercator avec parallèle
+étalon 7, polyconique 22, orthographique 21, Mercator oblique général),
+une sphère (1/f = 0), unité angulaire non degré ou paramètre manquant est
+**refusée avec un message d'erreur explicite** — jamais reprojetée
+silencieusement. Le repli proj4j ne couvre que les modèles mesurés en
+accord avec PROJ au millimètre ; là où ses formules divergent, la méthode
+reste refusée.
 
 Les projections sont calculées en interne (séries de Snyder, précision
-sub-millimétrique en avant, validée contre GDAL/PROJ). Les datums non-WGS84
-(NTF, SAD69…) sont traités comme WGS84 : décalage possible de l'ordre de la
-centaine de mètres, acceptable pour un fond cartographique.
+sub-millimétrique en avant, validée contre GDAL/PROJ) ou, pour les modèles
+hors de ce périmètre, via la bibliothèque proj4j intégrée — limitée au
+sous-ensemble vérifié sur des ancres PROJ dans les tests unitaires. Les
+datums non-WGS84 (NTF, SAD69…) sont traités comme WGS84 : décalage possible
+de l'ordre de la centaine de mètres, acceptable pour un fond cartographique.
 
 ## Construire
 
@@ -134,4 +148,7 @@ l'emprise, le SRID GeoTIFF, et sait décoder une tuile en PNG.
 
 ## Licence
 
-GPL v2 ou ultérieure (comme JOSM).
+GPL v2 ou ultérieure (comme JOSM). Le jar du plugin embarque le cœur de
+proj4j (Apache-2.0, utilisé uniquement pour les paramètres GeoKeys — jamais
+une base EPSG) ; son texte de licence est embarqué dans `cog.jar` sous
+`META-INF/LICENSE-proj4j.txt`.

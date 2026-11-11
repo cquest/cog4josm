@@ -13,6 +13,13 @@ dependencies {
     // API JOSM (contient aussi JMapViewer, JCS…). Récupérable via ./fetch-josm.sh
     compileOnly files('lib/josm-tested.jar')
 
+    // Phase 2.2: projection fallback for CRS models not covered by crs/ (Albers,
+    // Lambert azimuthal equal area, polar stereographic...). Apache-2.0 licensed,
+    // embedded in cog.jar below. NEVER add proj4j-epsg: its bundled EPSG database
+    // has restrictive terms (see Apache CALCITE-5399); CRS parameters must keep
+    // coming from the file's GeoKeys.
+    implementation 'org.locationtech.proj4j:proj4j:1.4.1'
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -38,6 +45,16 @@ test {
 
 jar {
     archiveFileName = 'cog.jar'
+    // JOSM plugins are single jars: the proj4j fallback (Apache-2.0, see the
+    // dependencies block) must be embedded, not shipped as a sibling jar.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    // Apache-2.0 requires shipping the license text with the embedded classes
+    // (the proj4j jar itself carries none); upstream v1.4.1 text, kept in lib/
+    from('lib/proj4j-LICENSE.txt') {
+        rename { 'META-INF/LICENSE-proj4j.txt' }
+    }
     manifest {
         def buildDate = new java.text.SimpleDateFormat("yyyy-MM-dd").format(new java.util.Date())
         attributes(

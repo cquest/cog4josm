@@ -59,6 +59,16 @@ public final class CustomCrs {
     public static final int KEY_PROJ_FALSE_ORIGIN_EASTING = 3086;
     public static final int KEY_PROJ_FALSE_ORIGIN_NORTHING = 3087;
     public static final int KEY_PROJ_SCALE_FACTOR = 3092;
+    // Additional projected keys observed in GDAL custom mode (3074=32767,
+    // phase 2.2): natural origin longitude/latitude (azimuthal and stereographic
+    // methods), Hotine oblique Mercator centre scale/azimuth/rectified-grid
+    // angle, and the polar-stereographic centre longitude.
+    public static final int KEY_PROJ_NAT_ORIGIN_LONG = 3088;
+    public static final int KEY_PROJ_NAT_ORIGIN_LAT = 3089;
+    public static final int KEY_PROJ_SCALE_AT_CENTER = 3093;
+    public static final int KEY_PROJ_AZIMUTH = 3094;
+    public static final int KEY_PROJ_CENTER_LONG = 3095;
+    public static final int KEY_PROJ_RECT_GRID_ANGLE = 3096;
 
     /** Geographic model type (GeoKey 1024 = 2). */
     public static final int MODEL_TYPE_GEOGRAPHIC = 2;
@@ -74,8 +84,22 @@ public final class CustomCrs {
     public static final int CT_LAMBERT_CONFORMAL_2SP = 8;
     /** GeoKey 3074=9: "Mercator_Oblique" = Lambert conformal conic 1SP. */
     public static final int CT_LAMBERT_CONFORMAL_1SP = 9;
-    /** GeoKey 3075=14: Lambert_Conformal_Conic_1SP. */
+    /** GeoKey 3075=14: Lambert_Conformal_Conic_1SP (libgeotiff-era writers). */
     public static final int M_LAMBERT_CONFORMAL_1SP = 14;
+    // Method codes GDAL writes in GeoKey 3075 when 3074=32767 (measured on
+    // GDAL 3.x outputs, see AGENTS.md). Note the value collision: 14 means
+    // Lambert 1SP for libgeotiff-style writers but oblique Stereographic for
+    // GDAL (disambiguated by the presence of standard parallels 3078/3079).
+    public static final int M_LAMBERT_AZIMUTHAL_EQUAL_AREA = 10;
+    public static final int M_ALBERS_EQUAL_AREA = 11;
+    public static final int M_EQUIDISTANT_CONIC = 13;
+    public static final int M_STEREOGRAPHIC = 14;
+    public static final int M_POLAR_STEREOGRAPHIC = 15;
+    public static final int M_ORTHOGRAPHIC = 21;
+    public static final int M_POLYCONIC = 22;
+    public static final int M_CYLINDRICAL_EQUAL_AREA = 28;
+    /** Hotine Oblique Mercator (EPSG method 9815), also used for somerc. */
+    public static final int M_HOTINE_OBLIQUE_MERCATOR = 9815;
 
     /** GeoTIFF linear units -> metres (0 = unsupported code). */
     private static final double[] LINEAR_TO_METRE = new double[9110];

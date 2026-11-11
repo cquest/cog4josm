@@ -204,6 +204,14 @@ public final class Crs {
             }
             case CustomCrs.CT_LAMBERT_CONFORMAL_1SP:
             case CustomCrs.M_LAMBERT_CONFORMAL_1SP: {
+                if (method == CustomCrs.M_LAMBERT_CONFORMAL_1SP
+                        && c.find(CustomCrs.KEY_PROJ_STD_PARALLEL1) == null
+                        && c.find(CustomCrs.KEY_PROJ_STD_PARALLEL2) == null) {
+                    // 3075=14 without standard parallels: GDAL means oblique
+                    // Stereographic (natural origin 3088/3089), not Lambert 1SP
+                    p = Proj4Backend.create(c, CustomCrs.M_STEREOGRAPHIC, ell);
+                    break;
+                }
                 double lat0 = reqDouble(c, CustomCrs.KEY_PROJ_ORIG_LAT, 3081);
                 double lon0 = optDouble(c, CustomCrs.KEY_PROJ_CENT_MERIDIAN, 0.0);
                 double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0);
@@ -215,6 +223,12 @@ public final class Crs {
                 break;
             }
             default:
+                // phase 2.2: models outside the in-house set go through the
+                // proj4j fallback, but only the verified subset (see there)
+                if (Proj4Backend.supports(method)) {
+                    p = Proj4Backend.create(c, method, ell);
+                    break;
+                }
                 throw new IllegalArgumentException("unsupported projection model: "
                         + describeMethod(coordTrans, methodCode));
         }
