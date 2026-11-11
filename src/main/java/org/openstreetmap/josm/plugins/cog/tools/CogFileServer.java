@@ -8,6 +8,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,7 +19,9 @@ import com.sun.net.httpserver.HttpServer;
 
 /**
  * Minimal static HTTP server supporting byte-range requests
- * (essential to serve a COG), using only the JDK.
+ * (essential to serve a COG), strong ETags and If-None-Match/304 answers
+ * (so the plugin's conditional metadata revalidation can be tried against
+ * it), using only the JDK.
  *
  * Usage: java org.openstreetmap.josm.plugins.cog.tools.CogFileServer &lt;directory&gt; &lt;port&gt;
  * Meant for tests only (serving a sample COG to JOSM).
@@ -55,6 +60,14 @@ public final class CogFileServer {
             exchange.getResponseHeaders().add("Content-Type",
                     file.toString().endsWith(".tif") || file.toString().endsWith(".tiff")
                             ? "image/tiff; application=geotiff; profile=cloud-optimized" : "application/octet-stream");
+            String etag = etagFor(file, size);
+            exchange.getResponseHeaders().add("ETag", etag);
+            String inm = exchange.getRequestHeaders().getFirst("If-None-Match");
+            if (inm != null && ("*".equals(inm) || inm.contains(etag))) {
+                System.out.println(path + ": 304 not modified (If-None-Match)");
+                exchange.sendResponseHeaders(304, -1);
+                return;
+            }
             long start = 0;
             long end = size - 1;
             boolean partial = false;
@@ -107,6 +120,24 @@ public final class CogFileServer {
             }
         } finally {
             exchange.close();
+        }
+    }
+
+    /**
+     * Strong ETag cheap to compute for a test server: SHA-256 over the first
+     * 8 KiB and the size — changes whenever the content changes near either
+     * end of the file, which is where a COG's identity lives.
+     */
+    private static String etagFor(Path file, long size) throws IOException {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            try (var in = Files.newInputStream(file)) {
+                md.update(in.readNBytes(8192));
+            }
+            md.update(Long.toString(size).getBytes(StandardCharsets.UTF_8));
+            return '"' + HexFormat.of().formatHex(md.digest()).substring(0, 16) + '-' + size + '"';
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("JVM without SHA-256", e);
         }
     }
 }

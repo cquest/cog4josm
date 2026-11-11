@@ -130,6 +130,15 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   MAX_RING_BYTES so huge warp windows never pad), and the base overview
   can be pre-decoded in one merged request (`prefetchBaseOverview`,
   phase 2.7 E2, called from `AddCogLayerAction` on the worker pool).
+  Since phase 2.8 metadata also survives restarts: `FileMetadataStore`
+  (one file per URL under the plugin cache directory, atomic writes,
+  per-file/per-directory caps, LRU-pruned by age) mirrors the in-memory
+  blocks; `CogReader.open` revalidates with a conditional `GET
+  If-None-Match` head read (`conditionalHeadRead`) — a 304 costs zero
+  body bytes, a changed fingerprint drops memory AND disk blocks before
+  re-reading. The store is attached once by `CogPlugin`
+  (`MetadataCache.global().attachStore`); without it the plugin works
+  in memory only (tests, spike). Never persisted: raster bytes.
   Rule: any new read path must choose deliberately between the metadata
   cache (`MetadataCachingSource`) and the direct source; never cache pixels
   **in the reader**. Composed 256 px display tiles are a different thing:
@@ -467,11 +476,14 @@ step. Known shortcuts:
 
 Phase 2 (done): per-tile reprojection (UTM, Lambert-93) through the in-house
 `crs/` formulas (no full PRJ).
+
 Phase 2.1 (done): custom GeoKeys 32767 mapped onto the existing `crs/`
 classes (`Crs.fromCustom`), no new projection math.
+
 Phase 2.2 (withdrawn by phase 2.4): proj4j fallback (`crs/Proj4Backend`) for
 models missing from the in-house `crs/` classes — the empirically verified
 subset only. Removed for licence purity (Apache-2.0 inside a GPL v2+ jar).
+
 Phase 2.3 (done): the hand-written EPSG code registry is replaced by the
 projection table shipped by the host application — `crs/JosmEpsgTable`
 reads JOSM's `data/projection/custom-epsg` at runtime (user-approved: the
@@ -479,15 +491,18 @@ plugin itself still embeds/downloads no EPSG database, `proj4j-epsg`
 stays forbidden). Built-ins are 4326/3857; other codes resolve when the
 entry's model is on the whitelist (longlat, tmerc, utm, lcc); anything
 else keeps an explicit refusal reason.
+
 Phase 2.4 (done): proj4j dependency and embedded classes removed, project
 back under pure GPL v2+ (no third-party code in the jar); models aea/laea/
 stere (table) and GeoKeys methods 10/11/28/14-stere/15/9815 refused with
 an explicit reason.
+
 Phase 2.5 (done): composed display tiles are kept in JOSM's own imagery
 tile cache — JCS region "cog" injected into `CogTileLoader`, key
 fingerprint(url+size+etag)+"/z/x/y", PNG-encoded `BufferedImageCacheEntry`
 (memory + disk spool, JOSM purge actions apply); error/blank tiles never
 cached. Raw COG bytes remain outside any cache (principle unchanged).
+
 Phase 2.6 (done): fewer HTTP requests per open — the one-byte `Range:`
 probe is dropped (the first ranged 206 read learns size/ETag/support; a
 200 answer still raises `RangeNotSupportedException` before big buffering),
@@ -495,6 +510,7 @@ and `CogReader.open` seeds the metadata cache with one speculative 32 KiB
 head read that `MetadataCache` containment lookups then serve for every
 metadata range. Measured: first open of `cog-paris-3857.tif` over HTTP
 dropped from 14 requests to 1; reopening stays at 1.
+
 Phase 2.7 (done): fewer raster requests while browsing — E1: a
 speculative ring of one extra tile row/column pads every fetch window
 in `CogReader.getTiles` (fetched in the same merged blocks, decoded into
@@ -506,21 +522,36 @@ background (`MainApplication.worker`) at layer load. Measured (PanCount
 probe, z14 sweep of 90 display tiles over `cog-paris-3857.tif`): 20 to
 12 range requests while bytes stayed flat (+0.007%: the ring is mostly
 subsumed by the neighbouring windows on a real COG).
-Phase 2.8 (planned): metadata persistence across restarts — keep
-MetadataCache blocks in the JCS "cog" region keyed by the same
-fingerprint(url+size+etag), then validate opens with a conditional
-GET (If-None-Match): a 304 costs ~0 bytes instead of re-fetching the
-32 KiB head block. Still exactly one request per open (fingerprint
-validation needs an answer); metadata only, never raster bytes
-(principle unchanged). Follow-ups for hostile layouts only: lazy
-per-level IFD parsing, or a speculative tail read (last 32 KiB) when
-the parser sees offsets outside the head block (header-tail COGs,
-tile-offset arrays bigger than the head).
+
+Phase 2.8 (done): metadata persistence across restarts. The original
+idea (MetadataCache blocks inside the JCS "cog" region) was dropped:
+that region is typed `BufferedImageCacheEntry` (display tiles) and
+purged by JOSM's image-cache rules — metadata does not fit it. Instead
+`reader/FileMetadataStore` (JDK-only): one file per URL
+(`<plugin>-<sha256(url)>.cogmeta`, text header `cogmeta1/size/etag` +
+binary records) under `getPluginDirs().getCacheDirectory(true)`,
+attached by `CogPlugin` to the global MetadataCache (mirror on open,
+transparent load on memory miss, dropped with the fingerprint). Opens
+revalidate through `HttpRangeReader.conditionalHeadRead` (`GET
+If-None-Match` on the 32 KiB head read): 304 = one request, ZERO body
+bytes; strong ETags only (weak ones never drive If-None-Match).
+Measured (ReopenCount probe, `cog-paris-3857.tif`, two JVM runs sharing
+one store): second-session open 1 request / 32768 bytes -> 1 request /
+0 bytes. Caps: 4 MiB per file, 1 MiB per block, 16 MiB per directory
+(oldest pruned); corrupt files are ignored, writes are atomic, all IO
+best-effort. Follow-ups for hostile layouts only: lazy per-level IFD
+parsing, or a speculative tail read (last 32 KiB) when the parser sees
+offsets outside the head block (header-tail COGs, tile-offset arrays
+bigger than the head).
+
 Marginal items, take only in passing: in-flight byte-range dedup
 between concurrent tile jobs (the tile LRU already covers most cases),
 one shared HttpClient across layers (connection reuse: latency only,
 no request-count change). Multi-range GET (multipart 206) stays
 rejected: uneven server support, parser complexity, and RangePlanner
 already merges what is contiguous.
-Phase 3: publication on the JOSM plugin list (requires an up-to-date
+
+Phase 3 : transform black/near black pixels as alpha transparency
+
+Final Phase : publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

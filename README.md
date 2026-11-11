@@ -47,6 +47,12 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   serves smaller reads): reopening the same COG costs that single head
   request. Raster content is never cached as raw bytes (only as decoded
   images).
+* Metadata also survives JOSM restarts: blocks persist in one small file
+  per URL under the plugin cache directory, and each open revalidates with
+  a conditional `If-None-Match` request — if the file did not change, the
+  answer is 304 and the metadata costs **zero bytes** over the wire
+  (measured: reopened COG goes from 32 KiB to 0 bytes for one request).
+  A changed size/ETag drops both memory and disk blocks before re-reading.
 * The composed 256 px display tiles go into **JOSM's own imagery tile
   cache** (the "cog" JCS region: JOSM memory management and disk tile
   cache, purged by the usual JOSM actions). Keys combine a fingerprint of
@@ -65,6 +71,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Byte-range reads, one head read at open (no probe) | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Speculative tile ring + base overview prefetch | ✅ |
+| Persistent metadata + conditional GET (304 on reopen) | ✅ |
 | Metadata LRU cache (never raw raster) | ✅ |
 | Composed display tiles in JOSM's tile cache (memory + disk) | ✅ |
 | TIFF/GeoTIFF parser (IFD, sub-IFD, GeoKeys) | ✅ |

@@ -23,7 +23,9 @@ import java.awt.image.BufferedImage;
  * per block instead of one per tile. The window is padded by a speculative
  * ring of one tile row/column (fetched and LRU-decoded, not returned): panning
  * to the neighbouring display tiles usually costs no request at all. Raw
- * raster bytes are never cached — only the decoded images are.</p>
+ * raster bytes are never cached — only the decoded images are. When the
+ * plugin attaches a {@link FileMetadataStore}, metadata also survives JOSM
+ * restarts: reopening a COG is one conditional request (304, no body).</p>
  */
 public final class CogReader implements Closeable {
 
@@ -73,15 +75,28 @@ public final class CogReader implements Closeable {
     public static CogReader open(String url, Map<String, String> headers) throws IOException {
         HttpRangeReader http = HttpRangeReader.open(url, headers);
         try {
-            // one speculative head read (no probe): the 206 answer validates
-            // range support and reveals size/ETag, a 200 answer throws
-            // RangeNotSupportedException before anything big is buffered
-            byte[] head = http.read(0, HEAD_READ_BYTES);
             MetadataCache cache = MetadataCache.global();
+            MetadataCache.Identity known = cache.knownIdentity(url);
+            byte[] head;
+            if (known != null) {
+                // phase 2.8: a persisted (size, ETag) fingerprint lets the
+                // head read be conditional — a 304 answer costs zero body
+                // bytes and the metadata comes from memory or the store
+                head = http.conditionalHeadRead(HEAD_READ_BYTES, known.size(), known.etag());
+            } else {
+                // one speculative head read (no probe): the 206 answer validates
+                // range support and reveals size/ETag, a 200 answer throws
+                // RangeNotSupportedException before anything big is buffered
+                head = http.read(0, HEAD_READ_BYTES);
+            }
             cache.validate(url, http.size(), http.etag());
-            // seed the metadata cache: parsing below slices this block
-            // whenever it covers the requested ranges
-            cache.store(url, 0, head);
+            if (head != null) {
+                // seed the metadata cache: parsing below slices this block
+                // whenever it covers the requested ranges
+                cache.store(url, 0, head);
+            }
+            // keep the store warm for the next session (no-op without store)
+            cache.mirrorToStore(url);
             return new CogReader(http, TiffParser.parse(new MetadataCachingSource(http)));
         } catch (IOException | RuntimeException e) {
             http.close();

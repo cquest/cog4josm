@@ -12,6 +12,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -36,6 +38,11 @@ class HttpRangeReaderTest {
     private int port;
     private final AtomicInteger rangeHits = new AtomicInteger();
     private final AtomicInteger fullHits = new AtomicInteger();
+    /** Requests received with If-None-Match, and matching 304 answers. */
+    private final AtomicInteger conditionalHits = new AtomicInteger();
+    private final AtomicInteger notModified = new AtomicInteger();
+    /** Body bytes actually sent on 206 answers. */
+    private final java.util.concurrent.atomic.AtomicLong rangeBytes = new java.util.concurrent.atomic.AtomicLong();
     /** Raw Range headers received, in order. */
     private final List<String> rangeRequests = Collections.synchronizedList(new ArrayList<>());
     /** User-Agent headers received alongside the ranges above. */
@@ -62,6 +69,19 @@ class HttpRangeReaderTest {
         try {
             byte[] tiff = cogBytes();
             String range = ex.getRequestHeaders().getFirst("Range");
+            if (range != null && range.startsWith("bytes=")) {
+                rangeRequests.add(range);
+                userAgents.add(ex.getRequestHeaders().getFirst("User-Agent"));
+                rangeHits.incrementAndGet(); // a 304 is still a request
+            }
+            ex.getResponseHeaders().add("ETag", testEtag());
+            String inm = ex.getRequestHeaders().getFirst("If-None-Match");
+            if (inm != null && inm.contains(testEtag())) {
+                conditionalHits.incrementAndGet();
+                notModified.incrementAndGet();
+                ex.sendResponseHeaders(304, -1);
+                return;
+            }
             if (range == null) {
                 fullHits.incrementAndGet();
                 ex.getResponseHeaders().add("Accept-Ranges", "bytes");
@@ -76,14 +96,12 @@ class HttpRangeReaderTest {
                 return;
             }
             String spec = range.substring("bytes=".length());
-            rangeRequests.add(range);
-            userAgents.add(ex.getRequestHeaders().getFirst("User-Agent"));
             String[] parts = spec.split("-");
             int from = Integer.parseInt(parts[0]);
             int to = parts.length > 1 && !parts[1].isEmpty() ? Integer.parseInt(parts[1]) : tiff.length - 1;
             to = Math.min(to, tiff.length - 1);
             int len = to - from + 1;
-            rangeHits.incrementAndGet();
+            rangeBytes.addAndGet(len);
             ex.getResponseHeaders().add("Content-Range", "bytes " + from + "-" + to + "/" + tiff.length);
             ex.sendResponseHeaders(206, len);
             try (OutputStream os = ex.getResponseBody()) {
@@ -155,6 +173,23 @@ class HttpRangeReaderTest {
         } finally {
             ex.close();
         }
+    }
+
+    /** Strong ETag of the fixture, as a real COG host would serve one. */
+    private static String testEtag;
+
+    private static String testEtag() {
+        if (testEtag == null) {
+            try {
+                byte[] t = cogBytes();
+                testEtag = '"' + java.util.HexFormat.of().formatHex(
+                        java.security.MessageDigest.getInstance("SHA-256").digest(t))
+                        .substring(0, 16) + '"';
+            } catch (java.security.NoSuchAlgorithmException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+        return testEtag;
     }
 
     private static byte[] cogBytes() {
@@ -335,6 +370,64 @@ class HttpRangeReaderTest {
             assertNotNull(r.getTile(coarsest, 1, 1));
             assertEquals(afterPrefetch, rangeHits.get(), "overview served from the LRU");
             assertEquals(0, r.prefetchBaseOverview(1), "size cap respected");
+        }
+    }
+
+    @Test
+    void reopenedLayerRevalidatesWithZeroBodyBytes() throws IOException {
+        // phase 2.8: metadata persists on disk; reopening a COG in a "new
+        // session" is one conditional request — a 304 with zero body bytes
+        Path dir = Files.createTempDirectory("cogmeta-test");
+        FileMetadataStore store = new FileMetadataStore(dir, "test");
+        MetadataCache cache = MetadataCache.global();
+        String url = url("/image.tif");
+        try {
+            cache.attachStore(store);
+            try (CogReader r = CogReader.open(url)) {
+                assertEquals(3857, r.info().crsCode);
+                assertEquals(1, rangeHits.get(), "first open: one plain head read");
+                assertEquals(0, conditionalHits.get(), "nothing known yet: no If-None-Match");
+                assertTrue(rangeBytes.get() > 0, "the head block came over the wire");
+                FileMetadataStore.Identity id = store.readIdentity(url);
+                assertNotNull(id, "fingerprint persisted for the next session");
+                assertEquals(cogBytes().length, id.size());
+                assertEquals(testEtag(), id.etag());
+                assertFalse(store.loadBlocks(url).isEmpty(), "head block persisted too");
+            }
+            cache.clearAll(); // simulate a JOSM restart
+            int reqBefore = rangeHits.get();
+            long bytesBefore = rangeBytes.get();
+            try (CogReader r = CogReader.open(url)) {
+                assertEquals(3857, r.info().crsCode, "metadata comes from the store");
+                assertEquals(1, rangeHits.get() - reqBefore, "one conditional request");
+                assertEquals(1, conditionalHits.get(), "If-None-Match was sent");
+                assertEquals(1, notModified.get(), "the server answered 304");
+                assertEquals(0, rangeBytes.get() - bytesBefore, "304: not one body byte");
+                BufferedImage t = r.getTile(0, 2, 2);
+                assertNotNull(t);
+                assertTrue(rangeBytes.get() - bytesBefore > 0, "raster bytes still fetched");
+            }
+            // tamper the persisted fingerprint: the file pretends to have
+            // changed, the 304 never arrives, stale blocks are dropped and
+            // the store is rewritten with the real one
+            store.writeAll(url, 12, "\"tampered\"",
+                    List.of(new FileMetadataStore.Persisted(0, new byte[8])));
+            cache.clearAll();
+            try (CogReader r = CogReader.open(url)) {
+                assertEquals(3857, r.info().crsCode, "re-read after fingerprint mismatch");
+                assertTrue(notModified.get() <= 1, "the tampered ETag got no 304");
+            }
+            FileMetadataStore.Identity fresh = store.readIdentity(url);
+            assertNotNull(fresh);
+            assertEquals(cogBytes().length, fresh.size(), "store rewritten with the real file");
+            assertEquals(testEtag(), fresh.etag());
+        } finally {
+            MetadataCache.global().attachStore(null);
+            try (var walk = Files.walk(dir)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+            }
         }
     }
 }

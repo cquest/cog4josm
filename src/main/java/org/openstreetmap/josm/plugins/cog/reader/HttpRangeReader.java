@@ -180,7 +180,86 @@ public final class HttpRangeReader implements ByteSource {
         // (DROP_BODY_CAP) before the subscription is cancelled
         HttpResponse<byte[]> resp = send(rangeRequest(offset + "-" + (offset + count - 1)),
                 ri -> new CappedBody(ri.statusCode() == 206 ? (long) count + 1 : DROP_BODY_CAP));
+        byte[] body = processRangeResponse(resp, offset, count);
+        if (body == null) {
+            // a 304 without If-None-Match is not a compliant answer
+            throw new ProtocolViolationException("304 without If-None-Match on " + uri);
+        }
+        return body;
+    }
+
+    /**
+     * Speculative head read with a conditional GET (phase 2.8): when the
+     * metadata cache knows a strong ETag for the file, {@code
+     * If-None-Match} is sent along the range request; a 304 answer means the
+     * file still matches the persisted fingerprint and costs zero body
+     * bytes — null is returned and only the request round-trip happens.
+     * A 206 (server without ETag support, or file changed) behaves exactly
+     * like {@link #read} and returns the body.
+     */
+    public byte[] conditionalHeadRead(int length, long knownSize, String ifNoneMatch) throws IOException {
+        IOException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                String range = "0-" + (length - 1L);
+                HttpRequest.Builder b = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(30))
+                        .header("Range", "bytes=" + range)
+                        .header("User-Agent", USER_AGENT_PREFIX + "; range=" + range + ")")
+                        .GET();
+                if (ifNoneMatch != null && !ifNoneMatch.startsWith("W/")) {
+                    // only strong ETags may drive If-None-Match on a byte
+                    // range: a weak one says nothing about the byte content
+                    b.header("If-None-Match", ifNoneMatch);
+                }
+                headers.forEach((k, v) -> {
+                    if (!"range".equalsIgnoreCase(k) && !"if-none-match".equalsIgnoreCase(k)) {
+                        b.header(k, v);
+                    }
+                });
+                HttpResponse<byte[]> resp = send(b.build(),
+                        ri -> new CappedBody(ri.statusCode() == 206 ? (long) length + 1 : DROP_BODY_CAP));
+                if (resp.statusCode() == 304) {
+                    // unchanged: the range support is proven; the ETag that
+                    // was offered is confirmed current, the known size too
+                    rangesSupported = true;
+                    if (ifNoneMatch != null) {
+                        etag = ifNoneMatch;
+                    }
+                    if (knownSize >= 0) {
+                        size = knownSize;
+                    }
+                    probed = size >= 0;
+                    return null;
+                }
+                return processRangeResponse(resp, 0, length);
+            } catch (ShortReadException e) {
+                last = e;
+                sleepBeforeRetry(attempt);
+            } catch (ProtocolViolationException e) {
+                // no compliant server would send this twice: fail fast
+                throw e;
+            } catch (IOException e) {
+                last = e;
+                if (attempt == MAX_ATTEMPTS) {
+                    throw e;
+                }
+                sleepBeforeRetry(attempt);
+            }
+        }
+        throw last;
+    }
+
+    /**
+     * Validates one range response and returns its (capped) body, or null
+     * for 304; throws on any non-compliant or failed answer. Shared by
+     * {@link #fetchRange} and {@link #conditionalHeadRead}.
+     */
+    private byte[] processRangeResponse(HttpResponse<byte[]> resp, long offset, int count) throws IOException {
         int status = resp.statusCode();
+        if (status == 304) {
+            return null;
+        }
         if (status == 416) {
             throw new IOException("Range 416 on " + uri + " (size=" + size + ", request=" + offset + ")");
         }

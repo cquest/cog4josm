@@ -6,6 +6,9 @@ never downloaded, only the needed TIFF tiles are fetched.
 
 ## New in 0.3.0 (since 0.2.0)
 
+Improved caching and minimized numbers of HTTP byte-range requests for
+faster load.
+
 - **Speculative tile ring** (phase 2.7 E1): every source-tile fetch window
   is padded by one extra row/column of tiles, fetched in the same merged
   byte-range blocks and decoded into the tile LRU (not part of the result).
@@ -32,8 +35,7 @@ release): `Plugin-Version: 0.3.0`, `Plugin-Mainversion: 19678`, Java 17+.
 
 ## Install
 
-Drop `cog4josm.jar` into `~/.josm/plugins/` (or Preferences → Plugins →
-Install a plugin from file), restart JOSM, then use the plugin menu to
+Drop `cog4josm.jar` into `~/.josm/plugins/` , restart JOSM, then use the plugin menu to
 open a COG URL.
 
 ---
@@ -46,6 +48,9 @@ jamais le fichier entier n'est téléchargé, seules les tuiles nécessaires
 sont lues.
 
 ## Nouveautés de la 0.3.0 (depuis la 0.2.0)
+
+Amélioration du cache et réduction du nombre de requêtes HTTP pour
+un chargement plus rapide.
 
 - **Ourlet spéculatif de tuiles** (phase 2.7 E1) : chaque fenêtre de
   lecture de tuiles source est ourlée d'une rangée et colonne
@@ -77,6 +82,5 @@ release) : `Plugin-Version: 0.3.0`, `Plugin-Mainversion: 19678`, Java 17+.
 
 ## Installation
 
-Déposez `cog4josm.jar` dans `~/.josm/plugins/` (ou Préférences →
-Plugins → Installer un plugin depuis un fichier), redémarrez JOSM, puis
+Déposez `cog4josm.jar` dans `~/.josm/plugins/` , redémarrez JOSM, puis
 ouvrez une URL de COG depuis le menu du plugin.

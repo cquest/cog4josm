@@ -50,6 +50,13 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   grand sert les lectures plus petites) : une réouverture du même COG ne
   coûte que cette requête tête. Le contenu raster n'est jamais mis en cache
   en octets bruts (seulement en images décodées).
+* Les métadonnées survivent aussi aux redémarrages de JOSM : les blocs
+  persistent dans un petit fichier par URL sous le répertoire de cache du
+  plugin, et chaque ouverture se revalide par une requête conditionnelle
+  `If-None-Match` — si le fichier n'a pas changé, la réponse est 304 et les
+  métadonnées ne coûtent **aucun octet** transmise (mesuré : la réouverture
+  passe de 32 KiB à 0 octet pour une requête). Une taille/ETag modifiée
+  invalide mémoire et disque avant relecture.
 * Les tuiles d'affichage 256 px composées sont stockées dans **le cache
   d'imagerie intégré de JOSM** (région JCS « cog » : gestion mémoire JOSM
   et cache tuiles sur disque, vidé par les actions JOSM habituelles).
@@ -70,6 +77,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Lecture byte-ranges, une seule lecture tête à l'ouverture | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
+| Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |
 | Cache LRU metadata (jamais le raster brut) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Conteneur BigTIFF (décalages 64 bits, fichiers PIX4Dmatic) | ✅ |
