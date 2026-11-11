@@ -54,12 +54,15 @@ final class Proj4Backend {
     }
 
     /**
-     * Builds the projection from the custom GeoKeys.
+     * Builds the projection from the custom GeoKeys. Linear parameters
+     * (false easting/northing) are declared in the projection linear units
+     * (GeoKey 3076): they are converted to metres by {@code unitFactor} so
+     * that proj4j, which always works in metres, receives the right values.
      *
      * @throws IllegalArgumentException when the keys are incomplete, describe an
      *         unmapped model, or proj4j refuses the parameters
      */
-    static Projection create(CustomCrs c, int method, Ellipsoid ell) {
+    static Projection create(CustomCrs c, int method, Ellipsoid ell, double unitFactor) {
         if (ell.inverseFlattening == 0.0) {
             // measured: proj4j forward is exact on a sphere but the aea
             // INVERSE formulas drift from PROJ by whole degrees; the tile
@@ -89,7 +92,16 @@ final class Proj4Backend {
                 // GDAL form: natural origin + scale factor (never lat_ts, whose
                 // proj4j port drifts from PROJ)
                 sb.append("+proj=stere");
+                Double natLat = c.dbl(CustomCrs.KEY_PROJ_NAT_ORIGIN_LAT);
                 angle(c, sb, " +lat_0=", CustomCrs.KEY_PROJ_NAT_ORIGIN_LAT, 90.0);
+                if (natLat != null && Double.isFinite(natLat) && Math.abs(natLat) >= 90.0 - 1e-9) {
+                    // measured: at a pole with a scale factor only, proj4j and
+                    // PROJ disagree; a polar system must declare its standard
+                    // parallel (GDAL writes method 3075=21 for those)
+                    throw new IllegalArgumentException("stereographic natural origin at a"
+                            + " pole with a scale factor (3092): PROJ and proj4j disagree,"
+                            + " the polar form needs a standard parallel");
+                }
                 angle(c, sb, " +lon_0=", CustomCrs.KEY_PROJ_NAT_ORIGIN_LONG, 180.0);
                 scale(c, sb, " +k_0=", CustomCrs.KEY_PROJ_SCALE_FACTOR, 1.0);
                 break;
@@ -159,11 +171,12 @@ final class Proj4Backend {
                 throw new IllegalArgumentException("no proj4j model for method " + method);
         }
         // false easting/northing: generic keys first, false-origin group as
-        // fallback (hybrid writers), default 0 (as PROJ itself)
+        // fallback (hybrid writers), default 0 (as PROJ itself); the GeoKey
+        // values are in the projection linear units, proj4j wants metres
         linear(c, sb, " +x_0=", CustomCrs.KEY_PROJ_FALSE_EASTING,
-                CustomCrs.KEY_PROJ_FALSE_ORIGIN_EASTING, 0.0);
+                CustomCrs.KEY_PROJ_FALSE_ORIGIN_EASTING, 0.0, unitFactor);
         linear(c, sb, " +y_0=", CustomCrs.KEY_PROJ_FALSE_NORTHING,
-                CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING, 0.0);
+                CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING, 0.0, unitFactor);
         // proj4j parses +rf/+f differently than PROJ: pass the semi-minor axis
         double b = ell.semiMajorAxis * (1.0 - ell.flattening);
         sb.append(" +a=").append(num(ell.semiMajorAxis)).append(" +b=").append(num(b));
@@ -206,7 +219,7 @@ final class Proj4Backend {
     }
 
     private static void linear(CustomCrs c, StringBuilder sb, String name, int key1, int key2,
-            double deflt) {
+            double deflt, double unitFactor) {
         Double v = c.dbl(key1);
         if (v == null || !Double.isFinite(v)) {
             v = c.dbl(key2);
@@ -214,11 +227,25 @@ final class Proj4Backend {
         if (v == null || !Double.isFinite(v)) {
             v = deflt;
         }
-        sb.append(name).append(num(v));
+        sb.append(name).append(num(v * unitFactor));
+    }
+
+    /**
+     * Projection from a parameter string rebuilt by {@link JosmEpsgTable}
+     * (explicit +a/+b, whitelisted model): same verification policy as the
+     * GeoKeys path - the model whitelist is enforced by the caller, the
+     * sphere ban by this method.
+     */
+    static Projection fromTableDef(String projDef, Ellipsoid ell) {
+        if (ell.inverseFlattening == 0.0) {
+            throw new IllegalArgumentException("sphere ellipsoid (1/f = 0): the proj4j"
+                    + " inverse of these models is not verified against PROJ");
+        }
+        return new Proj4Projection(projDef);
     }
 
     /** Exact decimal form: never scientific notation (a "E+" would break the proj4 token parsing). */
-    private static String num(double v) {
+    static String num(double v) {
         return new BigDecimal(Double.toString(v)).stripTrailingZeros().toPlainString();
     }
 

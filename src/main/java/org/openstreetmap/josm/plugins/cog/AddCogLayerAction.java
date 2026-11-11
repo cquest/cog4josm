@@ -51,23 +51,26 @@ public class AddCogLayerAction extends JosmAction {
                 } else if (info.customCrs != null && info.crsCode != 0
                         && info.crsCode != org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED) {
                     why = tr("Unknown EPSG:") + " " + info.crsCode + " "
-                            + tr("to the registry, and its GeoKeys parameters fallback failed: ")
+                            + tr("to the plugin: ")
+                            + org.openstreetmap.josm.plugins.cog.crs.Crs.tableReason(info.crsCode)
+                            + "; " + tr("and its GeoKeys parameters fallback failed: ")
                             + tryCustom(info);
                 } else {
                     why = info.crsCode == 0
                             || info.crsCode == org.openstreetmap.josm.plugins.cog.reader.CustomCrs.USER_DEFINED
                             ? tryCustom(info)
-                            : tr("Unknown EPSG:") + " " + info.crsCode;
+                            : tr("Unknown EPSG:") + " " + info.crsCode + " ("
+                                    + org.openstreetmap.josm.plugins.cog.crs.Crs.tableReason(info.crsCode) + ")";
                 }
                 JOptionPane.showMessageDialog(MainApplication.getMainFrame(),
                         tr("Unsupported coordinate reference system for this COG") + " (" + info.crsDescription() + ").\n"
                                 + tr("Reason: ") + why + "\n\n"
-                                + tr("Supported systems: EPSG:4326, EPSG:3857, "
-                                        + "WGS84 UTM zones (32601-32660, 32701-32760), "
-                                        + "EPSG:2154 (Lambert-93), EPSG:3942-3950 "
-                                        + "(Lambert-93 zones CC42-CC50), "
-                                        + "and GeoTIFF \"user-defined\" systems with explicit parameters "
-                                        + "(geographic, transverse Mercator, Lambert conformal conic)."),
+                                + tr("Supported systems: EPSG:4326, EPSG:3857, any code listed in the "
+                                        + "projection definitions shipped with JOSM (UTM, transverse "
+                                        + "Mercator, Lambert conformal conic...) when its model is "
+                                        + "supported by the plugin, and GeoTIFF \"user-defined\" systems "
+                                        + "with explicit parameters (geographic, transverse Mercator, "
+                                        + "Lambert conformal conic)."),
                         tr("Unsupported projection"), JOptionPane.WARNING_MESSAGE);
                 reader.close();
                 return;

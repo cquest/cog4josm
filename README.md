@@ -32,7 +32,10 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
   request. Raster content is never cached as raw bytes (only as decoded
   images).
 * Minimal dependencies: JDK, JOSM API, plus the embedded proj4j core in the
-  jar (Apache-2.0, used only for GeoKeys-driven reprojection).
+  jar (Apache-2.0, used only for verified reprojection models). CRS
+  parameters always come from the file itself (GeoKeys) or from the
+  projection table shipped by JOSM — the plugin embeds and downloads no
+  EPSG database of its own.
 
 ## Status (v0.1)
 
@@ -50,22 +53,43 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 | Reprojection (UTM, Lambert-93) | ✅ |
 | "Custom" GeoKeys (unregistered CRS, written by GDAL) | ✅ |
 | Extra CRS models via proj4j fallback (Albers…) | ✅ (phase 2.2) |
+| EPSG codes from the projection table shipped by JOSM | ✅ (phase 2.3) |
 | STAC panel (Panoramax) | ⏳ phase 3 |
 
 ## Supported coordinate systems
 
 | EPSG | System |
 |---|---|
-| 4326 | geographic WGS84 |
-| 3857 | Web Mercator |
-| 32601–32660 | UTM WGS84 north (zone N) |
-| 32701–32760 | UTM WGS84 south (zone N) |
-| 2154 | RGF97 / Lambert-93 (metropolitan France) |
-| 3942–3950 | RGF97 / Lambert-93 conformity zones CC42-CC50 |
+| 4326 | geographic WGS84 (built in) |
+| 3857 | Web Mercator (built in) |
 
-Besides the registered EPSG SRIDs, the plugin understands "custom" GeoKeys
-(value 32767, what GDAL writes for any system described by its parameters)
-when they match a known model:
+Every other EPSG code is resolved from the projection definitions shipped
+by the host application itself (JOSM's `data/projection/custom-epsg`,
+read at runtime — the plugin embeds and downloads no EPSG database of
+its own). Several thousands of codes are therefore available when their
+projection model is one the plugin computes, for instance UTM
+(32601-32760), RGF97 / Lambert-93 (2154) and its conformity zones
+(3942-3950), ETRS89-LAEA (3035):
+
+| Model (PROJ `+proj=`) | Implementation |
+|---|---|
+| `longlat` | geographic (ellipsoid + prime meridian) |
+| `tmerc` | in-house Transverse Mercator |
+| `utm` | in-house Transverse Mercator (zone form) |
+| `lcc` | in-house Lambert conformal conic 1SP/2SP |
+| `aea`, `laea` | proj4j fallback (verified against PROJ at ±1 mm) |
+| `stere` | proj4j fallback (oblique k form, polar lat_ts form) |
+
+Table entries using another model (Mercator `merc`, oblique stereographic
+`sterea`, sloping Mercator `somerc`, equidistant conic, polyconic,
+orthographic…), a token the plugin cannot honour (unusual axis order,
+named prime meridian, vertical unit) or a form measured to drift in the
+proj4j port (polar stereographic with `+k` only, no `+lat_ts`) are
+**rejected with an explicit reason** — never silently reprojected.
+
+Besides the codes resolved through the table, the plugin understands
+"custom" GeoKeys (value 32767, what GDAL writes for any system described
+by its parameters) when they match a known model:
 
 | Method (GeoKey 3075) | Supported system |
 |---|---|

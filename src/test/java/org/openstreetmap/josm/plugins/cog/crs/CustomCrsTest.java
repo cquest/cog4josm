@@ -285,8 +285,11 @@ class CustomCrsTest {
         };
         Projection p = Crs.fromCustom(new CustomCrs(keys, d, null));
         double[] xy = p.project(46.5, 3.0);
-        assertEquals(700000.0 / 0.3048, xy[0], 1e-3, "feet expected");
-        assertEquals(6600000.0 / 0.3048, xy[1], 1e-3);
+        // false easting/northing GeoKeys are declared in the projection
+        // linear units (feet here): the output at the false origin is exactly
+        // those values (GDAL semantics, verified against gdal2tiles-style files)
+        assertEquals(700000.0, xy[0], 1e-3, "feet expected");
+        assertEquals(6600000.0, xy[1], 1e-3);
     }
 
     /**

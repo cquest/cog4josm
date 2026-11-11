@@ -124,6 +124,66 @@ class ProjectionTest {
         }, 0.001);
     }
 
+    /**
+     * Anchors against the host projection table (JOSM custom-epsg): each row
+     * {EPSG, lon, lat, x, y, metres per linear unit} was produced with
+     * gdaltransform using the entry's own PROJ string with the datum shift
+     * tokens removed (towgs84/nadgrids) and +datum=NAME replaced by the
+     * +ellps=NAME the PROJ datum table implies - exactly the first-order
+     * reading the plugin implements. Coordinates are in the entry's declared
+     * linear unit (hence the factor column: ft, us-ft, to_meter entries).
+     * Tolerance: 1 mm expressed in that unit; inverse 1e-8 degrees.
+     */
+    private static final double[][] TABLE_ANCHORS = {
+        // tmerc, ellipsoids implied by +ellps= and by +datum= names
+        {2000, -62.5, 17.5, 346925.082507, 1934576.156907, 1},        // clrk80
+        {2017, -74.75, 50.0, 215187.560837, 5540822.845246, 1},       // clrk66 MTM
+        {2044, 105.5, 30.0, 18548244.259715, 3320277.661055, 1},      // krass
+        {2094, 106.0, 0.5, 500000.000000, 55265.023274, 1},           // WGS72
+        {2100, 24.5, 40.2, 542555.162848, 4450075.498211, 1},         // datum=GGRS87
+        {2136, -1.0, 4.666666666666667, 900000.000000, 0.0, 0.3047997101815088}, // to_meter foot
+        {2383, 114.0, 22.3, 500000.000000, 2467021.317948, 1},        // explicit +a/+b
+        {2937, 47.5333333333333, 0.11666666666667, 3300000.000000, 0.0, 1}, // krass origin
+        {3003, 9.5, 40.0, 1542681.874766, 4427952.828166, 1},         // intl
+        {3355, 31.2, 30.1, 634278.086962, 821102.318940, 1},          // helmert
+        {5520, 3.0, 52.0, 1500000.000000, 5762750.673788, 1},         // datum=potsdam
+        {27291, 175.5, -39.0, 300000.000000, 400000.000000, 0.9143984146160287}, // nzgd49, to_meter
+        {27291, 175.8, -39.3, 328301.679348, 363528.651679, 0.9143984146160287},
+        {27700, -1.5, 52.9, 433629.309246, 333770.267514, 1},         // datum=OSGB36 (airy)
+        {29901, -8.2, 53.6, 186760.740487, 261147.265878, 1},         // airy, k=1
+        {29902, -8.2, 53.6, 186760.740485, 261147.265878, 1},         // datum=ire65 (mod_airy!)
+        {29903, -8.2, 53.6, 186760.740485, 261147.265878, 1},         // mod_airy, k=1.000035
+        {30170, 140.0, 36.0, -75120.743909, -443573.226226, 1},       // bessel (Tokyo)
+        {31466, 7.0, 50.0, 2571686.386624, 5540758.787686, 1},        // bessel, +nadgrids
+        {102063, 80.8, 7.05, 164058.590782, 166409.650910, 1},        // evrst30, DMS angles
+        // lcc
+        {3110, 144.6, -37.2, 2464493.952410, 4477732.748198, 1},      // aust_SA, south parallels
+        {3415, 114.0, 21.0, 500000.000000, 500000.000000, 1},         // WGS72 origin
+        {22391, 10.2, 36.4, 526903.375335, 344408.669554, 1},         // datum=carthage, k_0 form
+        {31287, 13.8, 47.9, 434876.862242, 444558.676634, 1},         // datum=hermannskogel
+        {102191, -5.0, 33.5, 537156.514554, 322244.327824, 1},        // clrk80ign, DMS
+        {2233, -105.5, 36.6666666666667, 3000000.000000, 1000000.000000, 1200.0 / 3937.0}, // us-ft
+        {2233, -97.5, 35.5, 5380250.207830, 677092.226878, 1200.0 / 3937.0},
+        // utm (datum=nzgd49 -> intl, south)
+        {27258, 165.0, -45.0, 500000.000000, 5016956.877773, 1},
+        // proj4j subset: laea / stere / aea
+        {3035, 10.0, 52.0, 4321000.000000, 3210000.000000, 1},        // laea origin
+        {3035, 11.5, 51.2, 4425835.658703, 3122067.988768, 1},
+        {3572, -150.0, 45.0, 0.000000, -4889334.802955, 1},           // laea north pole
+        {3031, 0.0, -71.0, 0.000000, 2082760.108543, 1},              // stere polar lat_ts form
+        {102001, -96.0, 60.0, 0.000000, 2219228.023281, 1},           // aea, DMS, datum=NAD83
+    };
+
+    @Test
+    void tableAnchors() {
+        for (double[] c : TABLE_ANCHORS) {
+            Projection p = Crs.forEpsg((int) c[0]);
+            org.junit.jupiter.api.Assertions.assertNotNull(p, "EPSG:" + (int) c[0] + " must resolve");
+            check("EPSG:" + (int) c[0], p, new double[][]{{c[1], c[2], c[3], c[4]}},
+                    0.001 / c[5]);
+        }
+    }
+
     @Test
     void registry() {
         org.junit.jupiter.api.Assertions.assertNotNull(Crs.forEpsg(32601));
@@ -138,7 +198,12 @@ class ProjectionTest {
         org.junit.jupiter.api.Assertions.assertTrue(Crs.isSupported(3950));
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3942 - 1));
         org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(3950 + 1));
-        org.junit.jupiter.api.Assertions.assertFalse(Crs.isSupported(3035));
+        // the host table covers more models than the whitelist: oblique
+        // stereographic (sterea) and Mercator entries stay rejected, the
+        // LAEA 3035 that the old hand registry refused is now supported
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(2172));
+        org.junit.jupiter.api.Assertions.assertNull(Crs.forEpsg(53004));
+        org.junit.jupiter.api.Assertions.assertNotNull(Crs.forEpsg(3035));
         double[] ll = Crs.forEpsg(4326).unproject(2.35, 48.85);
         org.junit.jupiter.api.Assertions.assertEquals(48.85, ll[0], 0.0);
         org.junit.jupiter.api.Assertions.assertEquals(2.35, ll[1], 0.0);

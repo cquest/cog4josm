@@ -33,7 +33,10 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
   octets bruts (seulement en images décodées).
 * Dépendances minimales : JDK, API JOSM, plus le cœur proj4j intégré au
-  jar (Apache-2.0, utilisé uniquement pour la reprojection via GeoKeys).
+  jar (Apache-2.0, utilisé uniquement pour les modèles de projection
+  vérifiés). Les paramètres des CRS viennent toujours du fichier lui-même
+  (GeoKeys) ou de la table de projections embarquée par JOSM — le plugin
+  n'embarque ni ne télécharge aucune base EPSG propre.
 
 ## État (v0.1)
 
@@ -51,20 +54,43 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Reprojection (UTM, Lambert-93) | ✅ |
 | GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
 | Modèles de projection supplémentaires via repli proj4j (Albers…) | ✅ (phase 2.2) |
+| Codes EPSG pris de la table de projections embarquée par JOSM | ✅ (phase 2.3) |
 | Panneau STAC (Panoramax) | ⏳ phase 3 |
 
 ## Systèmes de coordonnées pris en charge
 
 | EPSG | Système |
 |---|---|
-| 4326 | géographique WGS84 |
-| 3857 | Web Mercator |
-| 32601–32660 | UTM WGS84 nord (zone N) |
-| 32701–32760 | UTM WGS84 sud (zone N) |
-| 2154 | RGF97 / Lambert-93 (France métropolitaine) |
-| 3942–3950 | RGF97 / Lambert-93 zones de conformité CC42-CC50 |
+| 4326 | géographique WGS84 (intégré) |
+| 3857 | Web Mercator (intégré) |
 
-En plus des SRID EPSG enregistrés, le plugin comprend les GeoKeys
+Tout autre code EPSG est résolu à partir des définitions de projection
+embarquées par l'application hôte elle-même (le fichier
+`data/projection/custom-epsg` de JOSM, lu à l'exécution — le plugin
+n'embarque ni ne télécharge aucune base EPSG propre). Plusieurs milliers
+de codes sont donc disponibles lorsque leur modèle de projection est un
+modèle que le plugin sait calculer, par exemple UTM (32601-32760),
+RGF97 / Lambert-93 (2154) et ses zones de conformité (3942-3950),
+ETRS89-LAEA (3035) :
+
+| Modèle (PROJ `+proj=`) | Implémentation |
+|---|---|
+| `longlat` | systématique (ellipsoïde + premier méridien) |
+| `tmerc` | Transverse de Mercator en interne |
+| `utm` | Transverse de Mercator en interne (forme zone) |
+| `lcc` | Conique conforme de Lambert 1SP/2SP en interne |
+| `aea`, `laea` | repli proj4j (vérifié contre PROJ à ±1 mm) |
+| `stere` | repli proj4j (forme oblique k, forme polaire lat_ts) |
+
+Les entrées de la table utilisant un autre modèle (Mercator `merc`,
+stéréographique oblique `sterea`, Mercator oblique `somerc`, conique
+équidistante, polyconique, orthographique…), un jeton que le plugin ne
+peut pas honorer (ordre d'axes inhabituel, premier méridien nommé, unité
+verticale) ou une forme mesurée en dérive dans le port proj4j
+(stéréographique polaire avec `+k` seul, sans `+lat_ts`) sont **refusées
+avec une raison explicite** — jamais reprojetées silencieusement.
+
+En plus des codes résolus via la table, le plugin comprend les GeoKeys
 « custom » (valeur 32767, ce que GDAL écrit pour tout système décrit par
 ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 

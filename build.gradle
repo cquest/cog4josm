@@ -20,6 +20,13 @@ dependencies {
     // coming from the file's GeoKeys.
     implementation 'org.locationtech.proj4j:proj4j:1.4.1'
 
+    // Phase 2.3: the EPSG code fallback reads the projection definitions
+    // shipped by JOSM itself (data/projection/custom-epsg). Compile and
+    // runtime resolution go through JOSM's classloader chain; the test task
+    // needs the same jar on its classpath to exercise that resource.
+    // NEVER move this to implementation: nothing from JOSM may be embedded.
+    testImplementation files('lib/josm-tested.jar')
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

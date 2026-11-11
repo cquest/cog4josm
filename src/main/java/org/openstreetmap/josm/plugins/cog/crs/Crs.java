@@ -9,10 +9,13 @@ import org.openstreetmap.josm.plugins.cog.reader.CustomCrs;
  *
  * Covered scopes:
  * <ul>
- *   <li>EPSG:4326 (WGS84 geographic) and EPSG:3857 (Web Mercator);</li>
- *   <li>WGS84 UTM: north zones 32601-32660, south zones 32701-32760;</li>
- *   <li>EPSG:2154 (RGF97 / Lambert-93, metropolitan France) and its
- *       conformity zones EPSG:3942-3950 (CC42-CC50);</li>
+ *   <li>EPSG:4326 (WGS84 geographic) and EPSG:3857 (Web Mercator), built
+ *       in;</li>
+ *   <li>any EPSG code listed in the projection definitions shipped by the
+ *       host application (JOSM's data/projection/custom-epsg), when its
+ *       model is one the plugin computes: geographic, transverse Mercator
+ *       and UTM, Lambert conformal conic 1SP/2SP, plus the verified proj4j
+ *       subset (Albers, LAEA, stereographic) - see {@link JosmEpsgTable};</li>
  *   <li>GeoTIFF GeoKey "user-defined" systems (codes 32767) when their
  *       parameters match a known model: geographic, transverse Mercator or
  *       Lambert conformal conic (phase 2.1, see {@link #fromCustom}).</li>
@@ -76,37 +79,18 @@ public final class Crs {
         if (epsg == 3857) {
             return new WebMercator();
         }
-        if (epsg >= 32601 && epsg <= 32660) {
-            return utm(epsg, epsg - 32600, false);
-        }
-        if (epsg >= 32701 && epsg <= 32760) {
-            return utm(epsg, epsg - 32700, true);
-        }
-        if (epsg == 2154) {
-            // RGF97 (GRS80) / Lambert-93
-            return new LambertConformalConic2SP(2154, Ellipsoid.GRS80,
-                    44.0, 49.0, 46.5, 3.0, 700000.0, 6600000.0);
-        }
-        if (epsg >= 3942 && epsg <= 3950) {
-            // RGF97 (GRS80) / Lambert-93 zones CC42-CC50: zone z = epsg - 3900
-            // has lat_0 = z, lat_1 = z - 0.75, lat_2 = z + 0.75, lon_0 = 3,
-            // x_0 = 1 700 000, y_0 = (z - 41) * 1 000 000 + 200 000
-            // (CC42 1 200 000, CC43 2 200 000, ... CC50 9 200 000; gdalsrsinfo
-            // parameters, origins verified per zone against gdaltransform)
-            double z = epsg - 3900.0;
-            return new LambertConformalConic2SP(epsg, Ellipsoid.GRS80,
-                    z - 0.75, z + 0.75, z, 3.0, 1700000.0,
-                    (z - 41.0) * 1000000.0 + 200000.0);
-        }
-        return null;
+        // every other registered code: the projection definitions shipped by
+        // the host application (data/projection/custom-epsg), limited to the
+        // models the plugin knows how to compute (see JosmEpsgTable)
+        return JosmEpsgTable.create(epsg);
     }
 
-    private static Projection utm(int epsg, int zone, boolean south) {
-        if (zone < 1 || zone > 60) {
-            return null;
-        }
-        return new TransverseMercator(epsg, Ellipsoid.WGS84,
-                0.9996, 6.0 * zone - 183.0, 0.0, 500000.0, south ? 10000000.0 : 0.0);
+    /**
+     * Why a code could not be resolved by the host projection table (GUI
+     * error detail). Never null.
+     */
+    public static String tableReason(int epsg) {
+        return JosmEpsgTable.reason(epsg);
     }
 
     // ------------------------------------------------ "user-defined" systems
@@ -187,12 +171,15 @@ public final class Crs {
         Ellipsoid ell = ellipsoid(c);
 
         Projection p;
+        // false easting/northing GeoKeys are expressed in the projection
+        // linear units (3076): convert to metres for the constructors, the
+        // Scaled wrapper below turns the output back into those units
         switch (method) {
             case CustomCrs.CT_TRANSVERSE_MERCATOR: {
                 double lat0 = reqDouble(c, CustomCrs.KEY_PROJ_ORIG_LAT, 3081);
                 double lon0 = reqDouble(c, CustomCrs.KEY_PROJ_CENT_MERIDIAN, 3080);
-                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0);
-                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_NORTHING, 0.0);
+                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0) * unitFactor;
+                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_NORTHING, 0.0) * unitFactor;
                 checkLatLon(lat0, lon0);
                 p = new TransverseMercator(0, ell, k0 == null ? 1.0 : k0, lon0, lat0, fe, fn);
                 break;
@@ -202,8 +189,8 @@ public final class Crs {
                 double sp2 = optDouble(c, CustomCrs.KEY_PROJ_STD_PARALLEL2, sp1);
                 double lat0 = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_LAT, sp1);
                 double lon0 = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_LONG, 0.0);
-                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_EASTING, 0.0);
-                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING, 0.0);
+                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_EASTING, 0.0) * unitFactor;
+                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_ORIGIN_NORTHING, 0.0) * unitFactor;
                 checkLatLon(lat0, lon0);
                 checkLatLon(sp1, 0);
                 checkLatLon(sp2, 0);
@@ -220,13 +207,13 @@ public final class Crs {
                         && c.find(CustomCrs.KEY_PROJ_STD_PARALLEL2) == null) {
                     // 3075=14 without standard parallels: GDAL means oblique
                     // Stereographic (natural origin 3088/3089), not Lambert 1SP
-                    p = Proj4Backend.create(c, CustomCrs.M_STEREOGRAPHIC, ell);
+                    p = Proj4Backend.create(c, CustomCrs.M_STEREOGRAPHIC, ell, unitFactor);
                     break;
                 }
                 double lat0 = reqDouble(c, CustomCrs.KEY_PROJ_ORIG_LAT, 3081);
                 double lon0 = optDouble(c, CustomCrs.KEY_PROJ_CENT_MERIDIAN, 0.0);
-                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0);
-                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_NORTHING, 0.0);
+                double fe = optDouble(c, CustomCrs.KEY_PROJ_FALSE_EASTING, 0.0) * unitFactor;
+                double fn = optDouble(c, CustomCrs.KEY_PROJ_FALSE_NORTHING, 0.0) * unitFactor;
                 checkLatLon(lat0, lon0);
                 // Lambert 1SP = 2SP with coincident parallels; k0 = 1 unless stated
                 p = new LambertConformalConic2SP(0, ell, lat0, lat0, lat0, lon0, fe, fn,
@@ -237,7 +224,7 @@ public final class Crs {
                 // phase 2.2: models outside the in-house set go through the
                 // proj4j fallback, but only the verified subset (see there)
                 if (Proj4Backend.supports(method)) {
-                    p = Proj4Backend.create(c, method, ell);
+                    p = Proj4Backend.create(c, method, ell, unitFactor);
                     break;
                 }
                 throw new IllegalArgumentException("unsupported projection model: "

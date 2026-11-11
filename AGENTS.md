@@ -20,17 +20,26 @@ layers, using HTTP byte-range reads only.
   license. No per-file license header (a root `LICENSE` is enough, follow the
   existing files).
 - V1 accepts only **EPSG:3857 and EPSG:4326**. Since phase 2, per-tile
-  reprojection is enabled for the CRSs listed in `crs/Crs` (4326, 3857, WGS84
-  UTM 32601-32660 / 32701-32760, Lambert-93 2154 and its conformity zones
-  3942-3950); since phase 2.1 also
-  **custom GeoKeys (32767)** whose parameters describe a known model
-  (geographic, Transverse Mercator, Lambert conformal conic 1SP/2SP — see
-  `Crs.fromCustom`); since phase 2.2 also a verified subset of other models
-  through the proj4j fallback (`crs/Proj4Backend`: Albers, LAEA, CEA,
-  stereographic incl. polar, somerc 90/90). Any other CRS or method must
-  raise an explicit error (no silent reprojection, no SRID guessing). No
-  PROJ.4/WKT parsing from files: only GeoTIFF keys are read — they feed
-  proj4j, which never consults an EPSG database.
+  reprojection is enabled for the CRSs listed in `crs/Crs`; since phase
+  2.1 also **custom GeoKeys (32767)** whose parameters describe a known
+  model (geographic, Transverse Mercator, Lambert conformal conic 1SP/2SP
+  — see `Crs.fromCustom`); since phase 2.2 also a verified subset of other
+  models through the proj4j fallback (`crs/Proj4Backend`: Albers, LAEA,
+  CEA, stereographic incl. polar, somerc 90/90); since phase 2.3 the
+  hand-written EPSG registry is **replaced** by the projection table
+  shipped by the host application: built-ins stay 4326/3857 only, every
+  other code is looked up in JOSM's `data/projection/custom-epsg`
+  (resource read through the classloader, `crs/JosmEpsgTable`) when its
+  model is on the whitelist (longlat, tmerc, utm, lcc + the verified
+  proj4j subset). CRS parameters therefore come from exactly three
+  sources: the built-ins, the file's GeoKeys, or the host table — the
+  plugin embeds and downloads **no EPSG database of its own**. Any other
+  CRS or method must raise an explicit error (no silent reprojection, no
+  SRID guessing). No PROJ.4/WKT parsing from COG files: files carry only
+  GeoTIFF keys; the host's own table is the second (user-approved)
+  source, its PROJ strings are parsed token by token and never fed raw
+  to a library — the parameters always reach the plugin's own classes or
+  proj4j with explicit `+a=`/`+b=` (never `+ellps=`).
 
 ## Language and style
 
@@ -63,6 +72,9 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   compile failure (the "1 actionable task" message) and `cp` would deploy a
   stale jar.
 - Java 17 target (`options.release = 17`): do not use a more recent API.
+- `lib/josm-tested.jar` is `compileOnly` (never bundled) and also
+  `testImplementation`: the CRS tests read the projection table resource
+  `/data/projection/custom-epsg` from it (see the phase 2.3 pitfalls).
 
 ## Useful gradle tasks
 
@@ -100,7 +112,8 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
 - `AddCogLayerAction`: URL dialog + open + zoom to the extent.
 - `crs/`: in-house projections (Snyder / USGS PP 1312, sub-mm accuracy in the
   forward direction, validated against GDAL/PROJ in `ProjectionTest`).
-  `Projection` interface (project/unproject), registry/cache `Crs.forEpsg`.
+  `Projection` interface (project/unproject), registry/cache `Crs.forEpsg`
+  (built-ins 4326/3857 + host-table lookup through `JosmEpsgTable`).
   `CogComposer.composeWarp`: 9x9 control grid projected exactly (3857 ->
   lat/lon -> model coordinates), bilinear interpolation per output pixel,
   alpha-aware ARGB bilinear sampling. The linear 3857/4326 paths of `compose`
@@ -263,6 +276,57 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   project/unproject for concurrent tile workers; transform failures return
   NaN, never throw.
 
+## Host EPSG table pitfalls (phase 2.3, measured against PROJ 9.9)
+
+- **Linear units in PROJ strings**: `+x_0`/`+y_0` are metres but the whole
+  output is then divided by the `+units`/`+to_meter` factor
+  (`+x_0=500000 +units=ft` outputs 1,640,419.95 ft). `JosmEpsgTable`
+  feeds the raw offsets to the metre-based constructors and a `Scaled`
+  wrapper expresses the output in the declared unit: do NOT "fix" this by
+  multiplying the offsets by the factor.
+- **Same semantics for the GeoKeys path** (bug fixed in 2.3): false
+  easting/northing are declared in the GeoKey 3076 linear unit and the
+  output coordinates are in that unit — `Proj4Backend.create` takes a
+  `unitFactor` that converts `+x_0`/`+y_0` to metres; `CustomCrsTest.
+  linearUnitsScaled` expects FE/FN verbatim.
+- **Token allow-list per model** (`MODEL_TOKENS`): unknown, misplaced or
+  duplicated tokens are rejected; `+k` xor `+k_0`; `+ellps` xor `+datum`
+  xor a/b/rf; `+units` xor `+to_meter`; unknown `+axis`, named `+pm`,
+  `+vunits` and unknown unit names are rejected (never approximated).
+  `towgs84`/`nadgrids` are ignored (datum first order, as elsewhere).
+- **Ellipsoid/datum name tables** are validated against PROJ: `helmert`
+  = rf 298.3 (PROJ alias of EPSG:7020 — WGS84's rf is centimetres off at
+  UTM scales), `+datum=ire65` implies `mod_airy` (with `airy` the error
+  is 0.8 m), `carthage` implies `clrk80ign`. Entries 29901/29902/29903
+  coincide within microns (k compensates the ellipsoid) yet the 29902
+  anchor still catches a wrong ire65 mapping.
+- **DMS spellings** `52d9'22.178"`, `0dE`, `96dW`: the trailing `"`
+  terminates the seconds, it introduces no second value (an earlier
+  regex read a phantom sub-seconds group).
+- **Polar stereographic with `+k` only, no `+lat_ts`** (ESRI entries
+  102018/102021): proj4j and PROJ use different radii (97,540 m vs
+  194,429 m) — rejected in `JosmEpsgTable` AND guarded in `Proj4Backend`
+  (GeoKeys natural origin at a pole + 3092 scale). The polar `+lat_ts`
+  form (EPSG:3031) and the oblique k_0 form agree with GDAL.
+- **`LambertConformalConic2SP` southern-hemisphere inverse**: for n < 0,
+  rho < 0 and (dx, dy) = rho * (sin theta, cos theta), so theta must be
+  `atan2(rhoSign*dx, rhoSign*dy)` — applying the sign to dx alone
+  reflects theta across the cone axis (caught by the EPSG:3110 anchor).
+- **Anchor recipe** (`ProjectionTest.TABLE_ANCHORS`, tolerance 1 mm in
+  the entry's own unit): `gdaltransform -s_srs EPSG:4326 -t_srs "<entry>"`
+  with the entry sanitized as: drop `+towgs84`/`+nadgrids`/`+vunits`,
+  keep `+units`/`+to_meter`, replace `+datum=NAME` by the `+ellps=` that
+  the PROJ datum table implies.
+- **Test classpath**: `build.gradle` carries
+  `testImplementation files('lib/josm-tested.jar')` so tests see the
+  host resource `/data/projection/custom-epsg` (6135 entries, first
+  entry wins). NEVER move that line to `implementation` — the plugin jar
+  must not embed JOSM classes (keep checking LinkCheck: ko=0).
+- **Behaviour change vs the old hand registry**: EPSG:3035 (laea) is now
+  supported; the explicit-refusal tests moved to 2172 (sterea), 53004
+  (`merc` — "Mercator is not taken from the table", 3857/4326 stay
+  built-in), 23700 (`somerc`), 102018 (polar k-only stere).
+
 ## Reference COG example
 
 `cog-paris-3857.tif` (root, 1.4 MB, EPSG:3857) and `cog-paris-l93.tif`
@@ -333,5 +397,12 @@ polar), somerc 90/90 — parameters always taken from the file's GeoKeys (no
 EPSG lookup). Only the empirically verified subset is routed there; the
 "no dependency" constraint was relaxed by user arbitration, `proj4j-epsg`
 stays forbidden (restrictive EPSG terms).
+Phase 2.3 (done): the hand-written EPSG code registry is replaced by the
+projection table shipped by the host application — `crs/JosmEpsgTable`
+reads JOSM's `data/projection/custom-epsg` at runtime (user-approved: the
+plugin itself still embeds/downloads no EPSG database, `proj4j-epsg`
+stays forbidden). Built-ins are 4326/3857; other codes resolve when the
+entry's model is on the whitelist (longlat, tmerc, utm, lcc, aea, laea,
+stere-verified forms); anything else keeps an explicit refusal reason.
 Phase 3: publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

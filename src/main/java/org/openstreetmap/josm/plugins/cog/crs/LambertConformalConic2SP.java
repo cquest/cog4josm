@@ -77,8 +77,13 @@ public final class LambertConformalConic2SP implements Projection {
     public double[] unproject(double x, double y) {
         double dx = x - falseEasting;
         double dy = rho0 - (y - falseNorthing);
-        double rho = Math.copySign(Math.hypot(dx, dy), n);
-        double theta = Math.atan2(Math.copySign(1, n) * dx, dy);
+        // southern hemisphere: n and rho are both negative (Snyder p. 177),
+        // (dx, dy) = rho * (sin theta, cos theta) so recover theta from the
+        // vector rho * (sin, cos) divided by rho, sign included, not from
+        // (dx, dy) alone (that reflects theta across the cone axis)
+        double rhoSign = n < 0 ? -1.0 : 1.0;
+        double rho = rhoSign * Math.hypot(dx, dy);
+        double theta = Math.atan2(rhoSign * dx, rhoSign * dy);
         double tp = Math.pow(rho / (k0 * ell.semiMajorAxis * bigF), 1 / n);
         // inversion of t(phi): Snyder fixed-point iteration, fast convergence
         double phi = Math.PI / 2 - 2 * Math.atan(tp);
