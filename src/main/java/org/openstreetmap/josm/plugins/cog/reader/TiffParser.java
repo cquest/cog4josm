@@ -251,6 +251,13 @@ public final class TiffParser {
     }
 
     private static IfdEntry decodeValue(int type, long count, byte[] data, boolean be) {
+        // Hardening: the declared count is attacker-controlled (up to 2^32-1)
+        // while the fetched data is capped: allocate only what the data can back.
+        long valueSize = type > 0 && type < TYPE_SIZES.length ? TYPE_SIZES[type] : 0;
+        if (valueSize > 0) {
+            count = Math.min(Math.max(count, 0), data.length / valueSize);
+        }
+        int n = (int) count;
         switch (type) {
             case 2: // ASCII
                 int len = data.length;
@@ -260,7 +267,7 @@ public final class TiffParser {
                 return new IfdEntry(type, count, null, null, new String(data, 0, len, java.nio.charset.StandardCharsets.US_ASCII));
             case 1: // BYTE
             case 7: { // UNDEFINED
-                long[] v = new long[(int) count];
+                long[] v = new long[n];
                 for (int i = 0; i < v.length; i++) {
                     v[i] = data[Math.min(i, data.length - 1)] & 0xFFL;
                 }
@@ -268,7 +275,7 @@ public final class TiffParser {
             }
             case 3: // SHORT
             case 8: { // SSHORT
-                long[] v = new long[(int) count];
+                long[] v = new long[n];
                 for (int i = 0; i < v.length; i++) {
                     int s = readU16(data, Math.min(2 * i, data.length - 2), be);
                     v[i] = type == 8 ? (short) s : s;
@@ -277,14 +284,14 @@ public final class TiffParser {
             }
             case 4: // LONG
             case 13: {
-                long[] v = new long[(int) count];
+                long[] v = new long[n];
                 for (int i = 0; i < v.length; i++) {
                     v[i] = Integer.toUnsignedLong(readInt(data, Math.min(4 * i, data.length - 4), be));
                 }
                 return new IfdEntry(type, count, v, null, null);
             }
             case 9: { // SLONG
-                long[] v = new long[(int) count];
+                long[] v = new long[n];
                 for (int i = 0; i < v.length; i++) {
                     v[i] = readInt(data, Math.min(4 * i, data.length - 4), be);
                 }
@@ -292,7 +299,7 @@ public final class TiffParser {
             }
             case 5: // RATIONAL
             case 10: { // SRATIONAL
-                double[] v = new double[(int) count];
+                double[] v = new double[n];
                 for (int i = 0; i < v.length; i++) {
                     long num = type == 10 ? readInt(data, Math.min(8 * i, data.length - 8), be)
                             : Integer.toUnsignedLong(readInt(data, Math.min(8 * i, data.length - 8), be));
@@ -303,7 +310,7 @@ public final class TiffParser {
                 return new IfdEntry(type, count, null, v, null);
             }
             case 12: { // DOUBLE
-                double[] v = new double[(int) count];
+                double[] v = new double[n];
                 for (int i = 0; i < v.length; i++) {
                     byte[] d = Arrays.copyOfRange(data, Math.min(8 * i, data.length - 8), Math.min(8 * i + 8, data.length));
                     long bits = 0;
@@ -316,7 +323,7 @@ public final class TiffParser {
                 return new IfdEntry(type, count, null, v, null);
             }
             case 11: { // FLOAT
-                double[] v = new double[(int) count];
+                double[] v = new double[n];
                 for (int i = 0; i < v.length; i++) {
                     byte[] f = Arrays.copyOfRange(data, Math.min(4 * i, data.length - 4), Math.min(4 * i + 4, data.length));
                     int b0 = f[be ? 3 : 0] & 0xFF | (f[be ? 2 : 1] & 0xFF) << 8
@@ -422,6 +429,17 @@ public final class TiffParser {
         int th = (int) ifd.getLong(TAG_TILE_LENGTH, 0);
         if (width <= 0 || height <= 0 || tw <= 0 || th <= 0) {
             return null;
+        }
+        // Hardening: the declared dimensions must be covered by the fetched
+        // TileOffsets/TileByteCounts tables, otherwise the tile index of
+        // CogInfo.Level escapes the arrays (computed on longs, cannot overflow:
+        // numX and numY are each below 2^31, their product below 2^62).
+        long numX = ((long) width + tw - 1) / tw;
+        long numY = ((long) height + th - 1) / th;
+        if (numX * numY > offsets.length) {
+            throw new IOException("TileOffsets/TileByteCounts too short for the declared "
+                    + width + "x" + height + " image (" + tw + "x" + th + " tiles): "
+                    + offsets.length + " entries for " + numX + "x" + numY + " tiles");
         }
         if (ifd.getLong(TAG_PLANAR_CONFIG, 1) != 1) {
             throw new IOException("PlanarConfiguration=2 not supported");

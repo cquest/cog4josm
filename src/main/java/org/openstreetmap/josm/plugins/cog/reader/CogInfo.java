@@ -79,11 +79,12 @@ public final class CogInfo {
         }
 
         public int numXTiles() {
-            return (width + tileWidth - 1) / tileWidth;
+            // long arithmetic: width + tileWidth - 1 can overflow int
+            return (int) Math.min(((long) width + tileWidth - 1) / tileWidth, Integer.MAX_VALUE);
         }
 
         public int numYTiles() {
-            return (height + tileHeight - 1) / tileHeight;
+            return (int) Math.min(((long) height + tileHeight - 1) / tileHeight, Integer.MAX_VALUE);
         }
 
         public boolean hasTile(int tx, int ty) {

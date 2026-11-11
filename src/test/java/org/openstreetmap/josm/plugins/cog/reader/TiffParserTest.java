@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 
@@ -158,5 +159,134 @@ class TiffParserTest {
         assertEquals(131072, levels.get(0).width);
         assertEquals(65536, levels.get(1).width);
         assertEquals(32768, levels.get(2).width);
+    }
+
+    // --- crafted raw TIFFs (security audit POCs): hostile counts and tables ---
+
+    private record RawEntry(int tag, int type, long count, long value, byte[] ext) {
+    }
+
+    /** One little-endian IFD at offset 8, external values appended after it. */
+    private static byte[] rawTiff(RawEntry... entries) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write('I');
+        out.write('I');
+        w16(out, 42);
+        w32(out, 8);
+        w16(out, entries.length);
+        long extPos = 8 + 2 + 12L * entries.length + 4;
+        for (RawEntry e : entries) {
+            w16(out, e.tag());
+            w16(out, e.type());
+            w32(out, e.count());
+            if (e.ext() == null) {
+                w32(out, e.value());
+            } else {
+                w32(out, extPos);
+                extPos += e.ext().length;
+            }
+        }
+        w32(out, 0);
+        for (RawEntry e : entries) {
+            if (e.ext() != null) {
+                out.write(e.ext());
+            }
+        }
+        return out.toByteArray();
+    }
+
+    private static void w16(ByteArrayOutputStream o, int v) {
+        o.write(v & 0xFF);
+        o.write(v >> 8 & 0xFF);
+    }
+
+    private static void w32(ByteArrayOutputStream o, long v) {
+        for (int i = 0; i < 4; i++) {
+            o.write((int) (v >> (8 * i)) & 0xFF);
+        }
+    }
+
+    private static byte[] leDoubles(double... v) {
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        for (double d : v) {
+            long b = Double.doubleToLongBits(d);
+            for (int i = 0; i < 8; i++) {
+                o.write((int) (b >> (8 * i)) & 0xFF);
+            }
+        }
+        return o.toByteArray();
+    }
+
+    @Test
+    void clampsHostileDeclaredCountToDataSize() throws IOException {
+        // audit POC: DOUBLE tag declaring 2^32-1 values (NegativeArraySize) or
+        // 2^28 values (multi-GB allocation) in a file of a few dozen bytes:
+        // the fetched data must bound the array actually built
+        byte[] file = rawTiff(new RawEntry(700, 12, 0xFFFFFFFFL, 0, new byte[8]));
+        List<TiffParser.Ifd> ifds = TiffParser.readIfds(new InMemoryByteSource(file), null);
+        TiffParser.IfdEntry e = ifds.get(0).entry(700);
+        assertEquals(1, e.doubles.length);
+
+        byte[] file2 = rawTiff(new RawEntry(700, 12, 1L << 28, 0, new byte[8]));
+        List<TiffParser.Ifd> ifds2 = TiffParser.readIfds(new InMemoryByteSource(file2), null);
+        assertEquals(1, ifds2.get(0).entry(700).doubles.length);
+    }
+
+    @Test
+    void rejectsShortTileOffsetTable() throws IOException {
+        // audit POC: 100000x100000 image with 1x1 tiles (10^10 tiles) but only
+        // 4 TileOffsets/TileByteCounts entries: the tile index escaped the arrays
+        // (ArrayIndexOutOfBoundsException) - parse must reject the file
+        byte[] offs = new byte[16];
+        byte[] cnts = new byte[16];
+        byte[] file = rawTiff(
+                new RawEntry(254, 4, 1, 0, null),
+                new RawEntry(256, 4, 1, 100000, null),
+                new RawEntry(257, 4, 1, 100000, null),
+                new RawEntry(258, 3, 1, 8, null),
+                new RawEntry(259, 3, 1, 1, null),
+                new RawEntry(262, 3, 1, 1, null),
+                new RawEntry(277, 3, 1, 1, null),
+                new RawEntry(322, 4, 1, 1, null),
+                new RawEntry(323, 4, 1, 1, null),
+                new RawEntry(324, 4, 4, 0, offs),
+                new RawEntry(325, 4, 4, 0, cnts),
+                new RawEntry(33550, 12, 3, 0, leDoubles(1, 1, 0)),
+                new RawEntry(33922, 12, 6, 0, leDoubles(0, 0, 0, 500000, 1000000, 0)));
+        IOException e = assertThrows(IOException.class, () -> TiffParser.parse(new InMemoryByteSource(file)));
+        assertTrue(e.getMessage().contains("TileOffsets"), e.getMessage());
+    }
+
+    @Test
+    void oversizedTileByteCountStaysHandled() throws IOException {
+        // a declared tile byte count beyond 2 GB (int overflow in the old
+        // copyOfRange arithmetic) must surface as an IOException, not a crash
+        byte[] offs = new byte[4];
+        byte[] cnts = new byte[4];
+        offs[0] = 100; // offset beyond the end of this tiny file
+        cnts[0] = (byte) 0x80; // 0x80000000 byte count
+        byte[] file = rawTiff(
+                new RawEntry(254, 4, 1, 0, null),
+                new RawEntry(256, 4, 1, 2, null),
+                new RawEntry(257, 4, 1, 2, null),
+                new RawEntry(258, 3, 1, 8, null),
+                new RawEntry(259, 3, 1, 1, null),
+                new RawEntry(262, 3, 1, 1, null),
+                new RawEntry(277, 3, 1, 1, null),
+                new RawEntry(322, 4, 1, 2, null),
+                new RawEntry(323, 4, 1, 2, null),
+                new RawEntry(324, 4, 1, 0, offs),
+                new RawEntry(325, 4, 1, 0, cnts),
+                new RawEntry(33550, 12, 3, 0, leDoubles(1, 1, 0)),
+                new RawEntry(33922, 12, 6, 0, leDoubles(0, 0, 0, 500000, 1000000, 0)));
+        try (CogReader r = CogReader.open(new InMemoryByteSource(file))) {
+            // bounded garbage is tolerated by the decoder; any unchecked
+            // exception (NegativeArraySize, IllegalArgument, AIOOBE) fails the test
+            try {
+                r.getTile(0, 0, 0);
+            } catch (IOException expected) {
+                // truncated tile data: normal rejection
+            }
+        }
     }
 }

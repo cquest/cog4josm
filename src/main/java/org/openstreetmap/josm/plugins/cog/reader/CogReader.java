@@ -122,8 +122,10 @@ public final class CogReader implements Closeable {
                     long[] r = ranges.get(idx);
                     int[] c = coords.get(idx);
                     int from = (int) (r[0] - b.offset);
-                    byte[] raw = Arrays.copyOfRange(data, from,
-                            Math.min(from + (int) r[1], data.length));
+                    // r[1] is attacker-controlled: keep the copy within the data
+                    // (a byte count beyond 2 GB would overflow the int cast)
+                    int to = (int) Math.min((long) data.length, (long) from + r[1]);
+                    byte[] raw = Arrays.copyOfRange(data, from, to);
                     BufferedImage img = TileDecoder.decode(lvl, raw);
                     tileCache.put(level + "/" + c[0] + "/" + c[1], img);
                     out.put(tileKey(c[0], c[1]), img);
