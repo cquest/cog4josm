@@ -1,133 +1,134 @@
 # josm-cog
 
-Plugin JOSM qui affiche des images **COG (Cloud Optimized GeoTIFF)** distantes
-comme couches d'arrière-plan, en les lisant **par HTTP byte-ranges** : jamais
-le fichier entier n'est téléchargé, seules les tuiles TIFF utiles sont
-récupérées (et mises en cache mémoire).
+(French version: [README_fr.md](README_fr.md))
 
-## Principe
+JOSM plugin displaying remote **COG (Cloud Optimized GeoTIFF)** imagery as
+background layers, read **through HTTP byte-ranges**: the whole file is
+never downloaded, only the needed TIFF tiles are fetched (and memory cached).
+
+## Principle
 
 ```
-HTTP Range ──► TiffParser ──► CogInfo (pyramide + géoréférencement)
+HTTP Range ──► TiffParser ──► CogInfo (pyramid + georeferencing)
                                   │
-JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide adéquat
-                     (recomposition)◄── CogReader (tuiles TIFF décodées)
+JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid level
+                   (recomposition)◄── CogReader (decoded TIFF tiles)
 ```
 
-* Le plugin se branche sur la chaîne d'imagerie standard de JOSM
-  (`AbstractCachedTileSourceLayer` + `TileLoader` dédié) : cache, zoom,
-  transparence, filtres d'imagerie fonctionnent tel quel.
-* Les tuiles d'affichage (grille OSM 256 px) sont **recomposées** à la volée
-  à partir des tuiles natives du COG (256/512/1024 px), quel que soit le
-  décalage de l'origine géoréférencée.
-* Décodeurs TIFF intégrés : pas (1), Deflate (8/32946), PackBits (32773),
-  LZW (5), JPEG (6, via ImageIO). Gris 8/16 bits, RGB(A), predictor horizontal.
-* Requêtes groupées : les petites plages (balises d'un IFD, tuiles voisines
-  d'une fenêtre) sont fusionnées en quelques requêtes `Range:` par bloc, sur
-  le modèle de l'I/O recouvrant de GDAL — environ 2 à 4 requêtes par tuile
-  d'affichage au lieu d'une par tuile source.
-* Cache LRU des **seules métadonnées** (en-tête, IFD, tables de décalages de
-  tuiles), validé par taille/ETag : une réouverture du même COG ne coûte
-  qu'une requête de sonde. Le contenu raster n'est jamais mis en cache en
-  octets bruts (seulement en images décodées).
-* Pas de dépendance externe : uniquement le JDK et l'API JOSM.
+* The plugin hooks into the standard JOSM imagery chain
+  (`AbstractCachedTileSourceLayer` + dedicated `TileLoader`): cache, zoom,
+  transparency and imagery filters work as is.
+* Display tiles (OSM 256 px grid) are **rebuilt** on the fly from the COG
+  native tiles (256/512/1024 px), whatever the offset of the georeferenced
+  origin.
+* Built-in TIFF decoders: none (1), Deflate (8/32946), PackBits (32773),
+  LZW (5), JPEG (6, via ImageIO). Gray 8/16 bits, RGB(A), horizontal predictor.
+* Coalesced requests: small ranges (one IFD's tags, neighbouring tiles of a
+  window) are merged into a few `Range:` requests per block, following GDAL's
+  overlapped-I/O model — about 2 to 4 requests per display tile instead of
+  one per source tile.
+* LRU cache of **metadata only** (header, IFDs, tile offset tables),
+  validated by size/ETag: reopening the same COG costs a single probe
+  request. Raster content is never cached as raw bytes (only as decoded
+  images).
+* No external dependency: JDK and JOSM API only.
 
-## État (v0.1)
+## Status (v0.1)
 
-| Fonctionnalité | État |
+| Feature | Status |
 |---|---|
-| Lecture byte-ranges + sonde `Range:` | ✅ |
-| Groupement des petites plages en requêtes par bloc | ✅ |
-| Cache LRU metadata (jamais le raster brut) | ✅ |
-| Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
-| Pyramide multi-niveaux, choix du meilleur niveau | ✅ |
-| Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |
-| Couche JOSM fonctionnelle (menu Imagery) | ✅ |
+| Byte-range reads + `Range:` probe | ✅ |
+| Small ranges merged into block requests | ✅ |
+| Metadata LRU cache (never raw raster) | ✅ |
+| TIFF/GeoTIFF parser (IFD, sub-IFD, GeoKeys) | ✅ |
+| Multi-level pyramid, best level choice | ✅ |
+| Web-Mercator tile recomposition | ✅ (EPSG:3857/4326) |
+| Working JOSM layer (Imagery menu) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
-| GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
-| Panneau STAC (Panoramax) | ⏳ phase 3 |
+| "Custom" GeoKeys (unregistered CRS, written by GDAL) | ✅ |
+| STAC panel (Panoramax) | ⏳ phase 3 |
 
-## Systèmes de coordonnées pris en charge
+## Supported coordinate systems
 
-| EPSG | Système |
+| EPSG | System |
 |---|---|
-| 4326 | géographique WGS84 |
+| 4326 | geographic WGS84 |
 | 3857 | Web Mercator |
-| 32601–32660 | UTM WGS84 nord (zone N) |
-| 32701–32760 | UTM WGS84 sud (zone N) |
-| 2154 | RGF97 / Lambert-93 (France métropolitaine) |
+| 32601–32660 | UTM WGS84 north (zone N) |
+| 32701–32760 | UTM WGS84 south (zone N) |
+| 2154 | RGF97 / Lambert-93 (metropolitan France) |
 
-En plus des SRID EPSG enregistrés, le plugin comprend les GeoKeys
-« custom » (valeur 32767, ce que GDAL écrit pour tout système décrit par
-ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
+Besides the registered EPSG SRIDs, the plugin understands "custom" GeoKeys
+(value 32767, what GDAL writes for any system described by its parameters)
+when they match a known model:
 
-| Méthode (GeoKey 3075) | Système pris en charge |
+| Method (GeoKey 3075) | Supported system |
 |---|---|
-| 1 | Transverse de Mercator (ellipsoïde et paramètres libres) |
-| 8 | Conique conforme de Lambert 1SP/2SP |
-| — | Systématique (géographique), ellipsoïde + premier méridien |
+| 1 | Transverse Mercator (free ellipsoid and parameters) |
+| 8 | Lambert conformal conic 1SP/2SP |
+| — | Geodetic (geographic), ellipsoid + prime meridian |
 
-Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
-GeoKeys** (cas des exports PIX4Dmatic vers Lambert-43/EPSG:3943, par
-exemple) est reconnu par le même mécanisme : le plugin retombe sur les
-paramètres déclarés.
+An EPSG code not listed above but **accompanied by its GeoKeys parameters**
+(case of PIX4Dmatic exports to Lambert-43/EPSG:3943, for instance) is
+recognized by the same mechanism: the plugin falls back on the declared
+parameters.
 
-Tout autre méthode (Albers 11, Mercator oblique…), unité angulaire non
-degré ou paramètre manquant est **refusé avec un message d'erreur
-explicite** — jamais reprojeté silencieusement.
+Any other method (Albers 11, oblique Mercator…), non-degree angular unit
+or missing parameter is **rejected with an explicit error message** —
+never silently reprojected.
 
-Les projections sont calculées en interne (séries de Snyder, précision
-sub-millimétrique en avant, validée contre GDAL/PROJ). Les datums non-WGS84
-(NTF, SAD69…) sont traités comme WGS84 : décalage possible de l'ordre de la
-centaine de mètres, acceptable pour un fond cartographique.
+Projections are computed in-house (Snyder series, sub-millimetric forward
+accuracy, validated against GDAL/PROJ). Non-WGS84 datums (NTF, SAD69…) are
+treated as WGS84: possible offset of the order of a hundred meters,
+acceptable for a map background.
 
-## Construire
+## Building
 
-Prérequis : un **JDK 17+ complet** (contenant `javac`), pas un simple
-JRE. Vérifiez avec `javac -version` ; si la commande manque, installez
-le JDK (Debian/Ubuntu : `sudo apt install openjdk-21-jdk-headless`).
+Prerequisite: a **full JDK 17+** (containing `javac`), not a plain JRE.
+Check with `javac -version`; if the command is missing, install the JDK
+(Debian/Ubuntu: `sudo apt install openjdk-21-jdk-headless`).
 
-Sans `javac`, Gradle s'arrête sur une erreur de ce genre (le chemin
-indiqué est le JRE qu'il a détecté) :
+Without `javac`, Gradle stops with an error like this (the path shown is
+the JRE it detected):
 
     Toolchain installation '/usr/lib/jvm/java-21-openjdk-amd64' does not
     provide the required capabilities: [JAVA_COMPILER]
 
-Si plusieurs environnement Java coexistent, désignez le bon :
+If several Java environments coexist, point at the right one:
 
 ```sh
-export JAVA_HOME=/chemin/vers/jdk      # doit contenir bin/javac
+export JAVA_HOME=/path/to/jdk      # must contain bin/javac
 ```
 
-L'API JOSM compilée est téléchargée par :
+The compiled JOSM API is downloaded by:
 
 ```sh
-./fetch-josm.sh          # place lib/josm-tested.jar
-./gradlew build          # produit build/libs/cog.jar + lance les tests
+./fetch-josm.sh          # places lib/josm-tested.jar
+./gradlew build          # produces build/libs/cog.jar + runs the tests
 ```
 
-## Utiliser
+## Using
 
-1. Copier `build/libs/cog.jar` dans `~/.josm/plugins/` (ou
-   « Préférences → Parameters → Plugins → Installer à partir d'un fichier local »).
-2. Redémarrer JOSM.
-3. Menu **Imagerie → Add remote COG (GeoTIFF) background layer…** et coller
-   l'URL d'un COG, par exemple :
+1. Copy `build/libs/cog.jar` to `~/.josm/plugins/` (or "Preferences →
+   Plugins → Install from file").
+2. Restart JOSM.
+3. Menu **Imagery → Add remote COG (GeoTIFF) background layer…** and paste
+   a COG URL, for example:
 
 ```
 https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/31/U/DQ/2020/6/S2A_31UDQ_20200629_1_L2A/TCI.tif
 ```
 
-## Diagnostic en ligne de commande (sans JOSM)
+## Command line diagnostics (no JOSM)
 
 ```sh
-./gradlew spike --args="https://exemple.com/image.tif"
-./gradlew spike --args="https://exemple.com/image.tif --tile 0 5 5 sortie.png"
+./gradlew spike --args="https://example.com/image.tif"
+./gradlew spike --args="https://example.com/image.tif --tile 0 5 5 out.png"
 ```
 
-Affiche la pyramide (niveaux, tailles de tuiles, compressions),
-l'emprise, le SRID GeoTIFF, et sait décoder une tuile en PNG.
+Prints the pyramid (levels, tile sizes, compressions), the extent, the
+GeoTIFF SRID, and can decode one tile to PNG.
 
-## Licence
+## License
 
-GPL v2 ou ultérieure (comme JOSM).
+GPL v2 or later (like JOSM).

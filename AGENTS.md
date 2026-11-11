@@ -30,8 +30,12 @@ layers, using HTTP byte-range reads only.
   tooltips) are in English **and wrapped in `tr()`**: the French version comes
   from JOSM i18n, not from the code. No accented letter nor non-ASCII sign in
   the sources (except the "…" in `tr()` strings, JOSM convention).
-- **Commit messages in French without accents.** This file (AGENTS.md) is in
-  English; README.md is in French and may keep accents.
+- **Commit messages in French without accents.** AGENTS.md and README.md are
+  in English; README_fr.md is the French twin of README.md (the only file
+  allowed to keep accents).
+- **Keep the two READMEs in sync:** any change to README.md must be mirrored
+  in README_fr.md in the same commit (and the other way around) — identical
+  structure, tables, commands and examples; only the prose differs.
 - Identifiers and API in English.
 - Imports at the top of files, no wildcard imports; JOSM `Logging` for all
   logging, messages prefixed "josm-cog:".
