@@ -115,6 +115,9 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   tiles are fetched coalesced and kept only as decoded images (`CogReader`
   cache). Measured on `test_data/cog-paris-3857.tif` over local HTTP: first
   open went from 14 requests (probe + 13 metadata) to 1 head read.
+  The requested range is also echoed inside the User-Agent comment
+  (`cog4josm/0.2.0 (…; range=a-b)`) because plain access logs do not
+  record the `Range:` header — debug aid, nothing parses it.
   Rule: any new read path must choose deliberately between the metadata
   cache (`MetadataCachingSource`) and the direct source; never cache pixels
   **in the reader**. Composed 256 px display tiles are a different thing:

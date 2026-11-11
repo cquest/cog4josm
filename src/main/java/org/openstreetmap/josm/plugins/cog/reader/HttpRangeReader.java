@@ -37,6 +37,14 @@ public final class HttpRangeReader implements ByteSource {
      * instead of draining the whole body, but too small to buffer anything.
      */
     private static final int DROP_BODY_CAP = 16;
+    /**
+     * User-Agent prefix; {@link #rangeRequest} closes the comment with the
+     * requested byte-range so plain HTTP access logs (which usually do not
+     * record the Range header) show which part of the file each request
+     * asked for - debug aid only, the Range header itself is of course sent.
+     */
+    private static final String USER_AGENT_PREFIX =
+            "cog4josm/0.2.0 (JOSM COG plugin; https://josm.openstreetmap.de";
 
     private final HttpClient client;
     private final URI uri;
@@ -235,7 +243,7 @@ public final class HttpRangeReader implements ByteSource {
         HttpRequest.Builder b = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds(30))
                 .header("Range", "bytes=" + range)
-                .header("User-Agent", "cog4josm/0.2.0 (JOSM COG plugin; https://josm.openstreetmap.de)")
+                .header("User-Agent", USER_AGENT_PREFIX + "; range=" + range + ")")
                 .GET();
         headers.forEach((k, v) -> {
             if (!"range".equalsIgnoreCase(k)) {

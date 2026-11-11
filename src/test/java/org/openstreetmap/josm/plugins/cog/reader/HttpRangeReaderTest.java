@@ -1,6 +1,7 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +38,8 @@ class HttpRangeReaderTest {
     private final AtomicInteger fullHits = new AtomicInteger();
     /** Raw Range headers received, in order. */
     private final List<String> rangeRequests = Collections.synchronizedList(new ArrayList<>());
+    /** User-Agent headers received alongside the ranges above. */
+    private final List<String> userAgents = Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void startServer() throws IOException {
@@ -74,6 +77,7 @@ class HttpRangeReaderTest {
             }
             String spec = range.substring("bytes=".length());
             rangeRequests.add(range);
+            userAgents.add(ex.getRequestHeaders().getFirst("User-Agent"));
             String[] parts = spec.split("-");
             int from = Integer.parseInt(parts[0]);
             int to = parts.length > 1 && !parts[1].isEmpty() ? Integer.parseInt(parts[1]) : tiff.length - 1;
@@ -188,6 +192,24 @@ class HttpRangeReaderTest {
             assertEquals(List.of("bytes=0-" + (CogReader.HEAD_READ_BYTES - 1)), rangeRequests,
                     "one clamped head read, no probe");
             assertEquals(1, rangeHits.get(), "parsing served from the head block");
+        }
+    }
+
+    @Test
+    void userAgentCommentCarriesTheRequestedRange() throws IOException {
+        // debug aid: plain HTTP access logs (which usually ignore request
+        // headers other than the Referer) then show which part of the file
+        // each request asked for, in valid RFC 9110 comment form
+        try (CogReader r = CogReader.open(url("/image.tif"))) {
+            r.getTile(0, 2, 2);
+        }
+        assertFalse(rangeRequests.isEmpty());
+        assertEquals(rangeRequests.size(), userAgents.size());
+        for (int i = 0; i < rangeRequests.size(); i++) {
+            String ua = userAgents.get(i);
+            assertEquals("cog4josm/0.2.0 (JOSM COG plugin; https://josm.openstreetmap.de; range="
+                    + rangeRequests.get(i).substring("bytes=".length()) + ")", ua);
+            assertTrue(ua.chars().allMatch(c -> c >= 0x20 && c <= 0x7E), "header stays ASCII: " + ua);
         }
     }
 
