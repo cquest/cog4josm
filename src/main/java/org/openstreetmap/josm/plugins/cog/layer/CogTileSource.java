@@ -145,9 +145,14 @@ public class CogTileSource extends AbstractTMSTileSource {
         return cacheFingerprint;
     }
 
-    /** JOSM tile cache key of one tile position (fingerprint + z/x/y). */
+    /**
+     * JOSM tile cache key of one tile position (fingerprint + transparency
+     * policy + z/x/y). The policy is part of the key so switching it in the
+     * layer menu can never serve stale composed tiles from the JCS cache.
+     */
     String cacheKey(int zoom, int x, int y) {
-        return cacheFingerprint + "/" + zoom + "/" + x + "/" + y;
+        return cacheFingerprint + "/" + reader.transparencyPolicy().configName()
+                + "/" + zoom + "/" + x + "/" + y;
     }
 
     static String fingerprint(String url, ByteSource source) {

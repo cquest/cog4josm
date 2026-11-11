@@ -30,6 +30,11 @@ import java.awt.image.BufferedImage;
  * lazily: they are fetched on the first tile request of their level, so
  * browsing a deep pyramid at overview zooms never pays for the
  * full-resolution tables.</p>
+ *
+ * <p>RGB sources without an alpha channel get black-to-alpha transparency by
+ * default ({@link TransparencyPolicy}, phase 3): near-black pixels are made
+ * transparent while decoding. The policy is per reader, its name enters the
+ * layer's tile cache keys, and each policy keeps its own decoded tiles.</p>
  */
 public final class CogReader implements Closeable {
 
@@ -68,6 +73,18 @@ public final class CogReader implements Closeable {
 
     private final ByteSource source;
     private final CogInfo info;
+    /**
+     * Black-to-alpha policy (phase 3, see {@link TransparencyPolicy}): the
+     * default turns near-black pixels of RGB/RGB-JPEG sources without an
+     * alpha channel transparent; the layer menu and the "cog.transparency"
+     * preference change it.
+     */
+    private volatile TransparencyPolicy transparency = TransparencyPolicy.BLACK_NEAR;
+    /**
+     * Decoded tiles, LRU. Keyed by policy as well as position: switching
+     * policies never re-fetches tiles a previous policy had already decoded
+     * (each policy pays its own first fetch).
+     */
     private final Map<String, BufferedImage> tileCache = Collections.synchronizedMap(
             new LinkedHashMap<>(64, 0.75f, true) {
                 @Override
@@ -75,6 +92,26 @@ public final class CogReader implements Closeable {
                     return size() > MAX_CACHED_TILES;
                 }
             });
+
+    private String tileCacheKey(TransparencyPolicy policy, int level, int tx, int ty) {
+        return policy.configName() + "/" + level + "/" + tx + "/" + ty;
+    }
+
+    /** Current black-to-alpha policy (phase 3). */
+    public TransparencyPolicy transparencyPolicy() {
+        return transparency;
+    }
+
+    /**
+     * Changes the black-to-alpha policy. Decoded tiles stay cached per
+     * policy (see {@code tileCacheKey}): the tiles the new policy had
+     * already decoded are reused, the others are decoded on demand.
+     */
+    public void setTransparencyPolicy(TransparencyPolicy policy) {
+        if (policy != null) {
+            transparency = policy;
+        }
+    }
 
     public static CogReader open(String url) throws IOException {
         return open(url, Map.of());
@@ -165,11 +202,15 @@ public final class CogReader implements Closeable {
         if (rx0 > rx1 || ry0 > ry1) {
             return out;
         }
+        // policy snapshot for the whole call: keys and decoding stay coherent
+        // even when the layer menu changes the policy in between
+        final TransparencyPolicy policy = transparency;
+        final boolean blackToAlpha = policy.makesBlackTransparent(lvl, info.noData);
         boolean requestedMiss = false;
         scan:
         for (int ty = ry0; ty <= ry1; ty++) {
             for (int tx = rx0; tx <= rx1; tx++) {
-                if (tileCache.get(level + "/" + tx + "/" + ty) == null) {
+                if (tileCache.get(tileCacheKey(policy, level, tx, ty)) == null) {
                     requestedMiss = true;
                     break scan;
                 }
@@ -182,7 +223,7 @@ public final class CogReader implements Closeable {
         // the ring is only speculative when something is actually fetched:
         // a pan fully covered by the previous ring costs zero request and
         // does not chase the horizon further
-        int[] ring = requestedMiss ? ringBounds(level, lvl, rx0, rx1, ry0, ry1) : null;
+        int[] ring = requestedMiss ? ringBounds(policy, level, lvl, rx0, rx1, ry0, ry1) : null;
         if (ring != null) {
             fx0 = ring[0];
             fx1 = ring[1];
@@ -193,7 +234,7 @@ public final class CogReader implements Closeable {
         List<int[]> coords = new ArrayList<>();
         for (int ty = fy0; ty <= fy1; ty++) {
             for (int tx = fx0; tx <= fx1; tx++) {
-                BufferedImage cached = tileCache.get(level + "/" + tx + "/" + ty);
+                BufferedImage cached = tileCache.get(tileCacheKey(policy, level, tx, ty));
                 if (cached != null) {
                     if (tx >= rx0 && tx <= rx1 && ty >= ry0 && ty <= ry1) {
                         out.put(tileKey(tx, ty), cached);
@@ -215,8 +256,8 @@ public final class CogReader implements Closeable {
                     // (a byte count beyond 2 GB would overflow the int cast)
                     int to = (int) Math.min((long) data.length, (long) from + r[1]);
                     byte[] raw = Arrays.copyOfRange(data, from, to);
-                    BufferedImage img = TileDecoder.decode(lvl, raw);
-                    tileCache.put(level + "/" + c[0] + "/" + c[1], img);
+                    BufferedImage img = TileDecoder.decode(lvl, raw, blackToAlpha);
+                    tileCache.put(tileCacheKey(policy, level, c[0], c[1]), img);
                     if (c[0] >= rx0 && c[0] <= rx1 && c[1] >= ry0 && c[1] <= ry1) {
                         out.put(tileKey(c[0], c[1]), img);
                     }
@@ -233,7 +274,8 @@ public final class CogReader implements Closeable {
      * MAX_RING_BYTES} (huge warp windows, coarse grids where the ring
      * covers everything anyway).
      */
-    private int[] ringBounds(int level, CogInfo.Level lvl, int rx0, int rx1, int ry0, int ry1)
+    private int[] ringBounds(TransparencyPolicy policy, int level, CogInfo.Level lvl,
+                             int rx0, int rx1, int ry0, int ry1)
             throws IOException {
         int cx0 = Math.max(0, rx0 - RING_TILES);
         int cx1 = Math.min(lvl.numXTiles() - 1, rx1 + RING_TILES);
@@ -250,7 +292,7 @@ public final class CogReader implements Closeable {
         for (int ty = cy0; ty <= cy1; ty++) {
             for (int tx = cx0; tx <= cx1; tx++) {
                 if ((tx < rx0 || tx > rx1 || ty < ry0 || ty > ry1)
-                        && tileCache.get(level + "/" + tx + "/" + ty) == null) {
+                        && tileCache.get(tileCacheKey(policy, level, tx, ty)) == null) {
                     long bc = Math.min(Math.max(0, lvl.tileByteCount(tx, ty)), MAX_RING_BYTES + 1);
                     extraBytes += bc;
                     if (extraBytes > MAX_RING_BYTES) {

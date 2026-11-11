@@ -69,9 +69,18 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 * Les tuiles d'affichage 256 px composées sont stockées dans **le cache
   d'imagerie intégré de JOSM** (région JCS « cog » : gestion mémoire JOSM
   et cache tuiles sur disque, vidé par les actions JOSM habituelles).
-  Les clés combinent une empreinte de la source (URL + taille + ETag) et
-  z/x/y : un fichier modifié ne ressert jamais de tuiles périmées ; les
+  Les clés combinent une empreinte de la source (URL + taille + ETag), la
+  politique de transparence et z/x/y : un fichier modifié ne ressert
+  jamais de tuiles périmées ; les
   tuiles d'erreur et les tuiles vides ne sont jamais mises en cache.
+* Transparence noir → alpha : les sources RGB (ou JPEG YCbCr) sans canal
+  alpha voient leurs pixels quasi noirs rendus transparents — canaux ≤ 8
+  par défaut (absorbe les franges JPEG), ou seulement si le fichier
+  déclare `GDAL_NODATA` noir. Activé par défaut ; réglable par couche
+  dans son menu (« Transparence des noirs ») ou globalement par la
+  préférence `cog.transparency` (`black_near` / `metadata` / `none`).
+  Les sources en niveaux de gris ou portant déjà un alpha ne sont jamais
+  touchées.
 * Dépendances minimales : **JDK + API JOSM uniquement**. Le jar du plugin
   ne contient aucun code tiers (GPL v2+ pure). Les paramètres des CRS
   viennent toujours du fichier lui-même (GeoKeys) ou de la table de
@@ -79,12 +88,13 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   aucune base EPSG propre ; les modèles qu'il ne sait pas calculer sont
   refusés.
 
-## État (v0.4)
+## État (v0.5)
 
 | Fonctionnalité | État |
 |---|---|
 | Lecture byte-ranges, blocs tête + queue à l'ouverture | ✅ |
 | Tables de tuiles lues paresseusement, par niveau | ✅ |
+| Transparence noir → alpha (sources RGB sans alpha) | ✅ (phase 3) |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |

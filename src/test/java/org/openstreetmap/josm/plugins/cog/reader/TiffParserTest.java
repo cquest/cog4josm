@@ -2,6 +2,7 @@ package org.openstreetmap.josm.plugins.cog.reader;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -109,6 +110,22 @@ class TiffParserTest {
         // small L1 tables stayed eager: no further read when used
         assertEquals(1, ci.level(1).tileOffsets().length);
         assertEquals(readsAfterLoad, reads[0], "eager tables never re-fetched");
+    }
+
+    @Test
+    void gdalNoDataTagRoundTrip() throws IOException {
+        byte[] tiff = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(32, 32, 1, 1, 8, false, false, "0 0 0")), 3857, 1.0, 0.0, 0.0);
+        CogInfo ci = TiffParser.parse(new InMemoryByteSource(tiff));
+        assertEquals("0 0 0", ci.noData);
+        assertEquals(4, ci.level(0).numXTiles() * ci.level(0).numYTiles());
+        // a spec without noData keeps the tag absent (regression: the ASCII
+        // block must not shift the geo tags around)
+        byte[] plain = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(32, 32, 1, 1, 8, false)), 3857, 1.0, 0.0, 0.0);
+        CogInfo ci2 = TiffParser.parse(new InMemoryByteSource(plain));
+        assertNull(ci2.noData);
+        assertEquals(3857, ci2.crsCode);
     }
 
     @Test

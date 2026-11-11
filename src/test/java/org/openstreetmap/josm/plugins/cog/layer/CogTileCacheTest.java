@@ -24,8 +24,10 @@ import org.openstreetmap.josm.data.cache.BufferedImageCacheEntry;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.plugins.cog.reader.ByteSource;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
+import org.openstreetmap.josm.plugins.cog.reader.InMemoryByteSource;
 import org.openstreetmap.josm.plugins.cog.reader.MercatorTiles;
 import org.openstreetmap.josm.plugins.cog.reader.TestTiffWriter;
+import org.openstreetmap.josm.plugins.cog.reader.TransparencyPolicy;
 
 /**
  * The JOSM tile cache region of the layer ("cog") stores the COMPOSED display
@@ -140,8 +142,25 @@ class CogTileCacheTest {
         CogTileSource source = fixture3857().source();
         String fingerprint = source.getCacheFingerprint();
         assertEquals(16, fingerprint.length());
-        assertEquals(fingerprint + "/12/3/5", source.cacheKey(12, 3, 5));
+        assertEquals(fingerprint + "/black_near/12/3/5", source.cacheKey(12, 3, 5));
         assertNotEquals(source.cacheKey(12, 3, 5), source.cacheKey(12, 3, 6));
+    }
+
+    @Test
+    void cacheKeyChangesWithTransparencyPolicy() throws IOException {
+        // switching the policy in the layer menu must not be able to serve
+        // composed tiles cached under another one
+        byte[] tiff = TestTiffWriter.write(
+                List.of(new TestTiffWriter.LevelSpec(64, 64, 8, 1, 8, false)),
+                3857, 10.0, ORIGIN_X, ORIGIN_Y);
+        CogReader reader = CogReader.open(new InMemoryByteSource(tiff));
+        CogTileSource source = new CogTileSource(
+                new ImageryInfo("policy key test", "http://localhost/policy-key.tif"), reader);
+        String before = source.cacheKey(12, 3, 5);
+        reader.setTransparencyPolicy(TransparencyPolicy.NONE);
+        assertNotEquals(before, source.cacheKey(12, 3, 5), "keys must change with the policy");
+        reader.setTransparencyPolicy(TransparencyPolicy.BLACK_NEAR);
+        assertEquals(before, source.cacheKey(12, 3, 5), "and be stable for a given policy");
     }
 
     @Test
@@ -160,7 +179,7 @@ class CogTileCacheTest {
         assertFalse(CogTileLoaderJob.isBlank(first.getImage()), "tile covers the COG: not blank");
         assertEquals(1, backing.size(), "one composed tile must be cached");
         assertNotNull(backing.get(fx.source().cacheKey(pos[0], pos[1], pos[2])),
-                "cache key = fingerprint/zoom/x/y");
+                "cache key = fingerprint/policy/zoom/x/y");
 
         // a second tile at the same position must be served from the cache
         // without any new byte-range read (PNG round-trip included)

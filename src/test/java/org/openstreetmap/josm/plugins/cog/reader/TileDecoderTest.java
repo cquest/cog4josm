@@ -1,6 +1,7 @@
 package org.openstreetmap.josm.plugins.cog.reader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -207,6 +208,123 @@ class TileDecoderTest {
                 new long[]{0}, new long[]{raw.length});
         IOException e = assertThrows(IOException.class, () -> TileDecoder.decode(lvl, raw));
         assertTrue(e.getMessage().contains("exceeds the declared tile size"), e.getMessage());
+    }
+
+    // ------------------------------------------------- black-to-alpha (phase 3)
+
+    private static CogInfo.Level rgb8Level(int w, int h, int photometric, int spp, int[] extras) {
+        int bps = spp * w * h;
+        return new CogInfo.Level(0, w, h, w, h, 1, photometric, 1,
+                spp, new int[]{8, 8, 8}, extras, 1, 0, false,
+                new long[]{0}, new long[]{bps});
+    }
+
+    @Test
+    void rgbEligibilityPredicates() {
+        assertTrue(rgb8Level(2, 2, 2, 3, new int[0]).isRgbNoAlpha());
+        // YCbCr always decodes through JPEG into full RGB: also eligible
+        assertTrue(new CogInfo.Level(0, 16, 16, 16, 16, 6, 6, 1,
+                3, new int[]{8, 8, 8}, new int[0], 1, 0, false,
+                new long[]{0}, new long[]{0}).isRgbNoAlpha());
+        // RGBA (GDAL mask extra sample), grey and 16-bit RGB are never touched
+        assertFalse(rgb8Level(2, 2, 2, 4, new int[]{2}).isRgbNoAlpha());
+        assertFalse(rgb8Level(2, 2, 1, 1, new int[0]).isRgbNoAlpha());
+        assertFalse(new CogInfo.Level(0, 2, 2, 2, 2, 1, 2, 1,
+                3, new int[]{16, 16, 16}, new int[0], 1, 0, false,
+                new long[]{0}, new long[]{0}).isRgbNoAlpha());
+    }
+
+    @Test
+    void policySelection() {
+        CogInfo.Level rgb = rgb8Level(2, 2, 2, 3, new int[0]);
+        CogInfo.Level rgba = rgb8Level(2, 2, 2, 4, new int[]{2});
+        assertTrue(TransparencyPolicy.BLACK_NEAR.makesBlackTransparent(rgb, null));
+        assertFalse(TransparencyPolicy.NONE.makesBlackTransparent(rgb, "0 0 0"));
+        assertTrue(TransparencyPolicy.METADATA.makesBlackTransparent(rgb, "0 0 0"));
+        assertTrue(TransparencyPolicy.METADATA.makesBlackTransparent(rgb, "0"));
+        assertFalse(TransparencyPolicy.METADATA.makesBlackTransparent(rgb, "0 0 1"));
+        assertFalse(TransparencyPolicy.METADATA.makesBlackTransparent(rgb, "-9999"));
+        assertFalse(TransparencyPolicy.METADATA.makesBlackTransparent(rgb, null));
+        // an alpha-carrying level is never keyed out, whatever the policy
+        assertFalse(TransparencyPolicy.BLACK_NEAR.makesBlackTransparent(rgba, "0 0 0"));
+        // threshold: channels <= 8 key out, one channel above stays opaque
+        assertTrue(TransparencyPolicy.nearBlack(0, 0, 0));
+        assertTrue(TransparencyPolicy.nearBlack(8, 8, 8));
+        assertFalse(TransparencyPolicy.nearBlack(9, 8, 8));
+        // preference names
+        assertEquals("black_near", TransparencyPolicy.BLACK_NEAR.configName());
+        assertEquals(TransparencyPolicy.NONE, TransparencyPolicy.fromConfigName("none"));
+        assertEquals(TransparencyPolicy.METADATA, TransparencyPolicy.fromConfigName("metadata"));
+        assertEquals(TransparencyPolicy.BLACK_NEAR, TransparencyPolicy.fromConfigName("garbage"));
+        assertEquals(TransparencyPolicy.BLACK_NEAR, TransparencyPolicy.fromConfigName(null));
+    }
+
+    @Test
+    void blackToAlphaRawRgbThresholdEdges() throws IOException {
+        byte[] px = {
+                0, 0, 0, 8, 8, 8,
+                9, 8, 0, (byte) 255, (byte) 255, (byte) 255,
+        };
+        CogInfo.Level lvl = rgb8Level(2, 2, 2, 3, new int[0]);
+        BufferedImage on = TileDecoder.decode(lvl, px, true);
+        assertEquals(0, on.getRGB(0, 0) >>> 24, "(0,0,0) transparent");
+        assertEquals(0, on.getRGB(1, 0) >>> 24, "(8,8,8) transparent");
+        assertEquals(255, on.getRGB(0, 1) >>> 24, "(9,8,0) opaque");
+        assertEquals(255, on.getRGB(1, 1) >>> 24, "white opaque");
+        assertEquals((9 << 16) | (8 << 8), on.getRGB(0, 1) & 0xFFFFFF, "colors kept");
+        // without the flag: the plain RGB path is untouched (regression)
+        BufferedImage off = TileDecoder.decode(lvl, px, false);
+        assertEquals(-1 << 24, off.getRGB(0, 0) & 0xFF00_0000, "opaque as before");
+    }
+
+    @Test
+    void blackToAlphaJpegPostPass() throws IOException {
+        // YCbCr JPEG through ImageIO: ImageIO never returns alpha, the
+        // post-pass keys the black background out (threshold absorbs the
+        // JPEG fringes around the red square) and keeps the square opaque
+        BufferedImage src = new BufferedImage(16, 16, BufferedImage.TYPE_INT_RGB);
+        for (int y = 4; y < 12; y++) {
+            for (int x = 4; x < 12; x++) {
+                src.setRGB(x, y, 0xFF0000);
+            }
+        }
+        ByteArrayOutputStream jpeg = new ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(src, "JPEG", jpeg);
+        byte[] raw = jpeg.toByteArray();
+        CogInfo.Level lvl = new CogInfo.Level(0, 16, 16, 16, 16, 6, 6, 1,
+                3, new int[]{8, 8, 8}, new int[0], 1, 0, false,
+                new long[]{0}, new long[]{raw.length});
+        BufferedImage plain = TileDecoder.decode(lvl, raw);
+        assertEquals(255, plain.getRGB(0, 0) >>> 24, "JPEG has no alpha without the policy");
+        BufferedImage keyed = TileDecoder.decode(lvl, raw, true);
+        assertEquals(0, keyed.getRGB(0, 0) >>> 24, "black corner transparent");
+        assertEquals(0, keyed.getRGB(15, 15) >>> 24, "black corner transparent (far)");
+        int red = keyed.getRGB(8, 8);
+        assertEquals(255, red >>> 24, "red square stays opaque");
+        assertTrue(((red >> 16) & 0xFF) > TransparencyPolicy.NEAR_BLACK_THRESHOLD, "still red");
+    }
+
+    @Test
+    void readerDefaultsToBlackNearAndKeysLruPerPolicy() throws IOException {
+        byte[] tiff = TestTiffWriter.write(List.of(
+                new TestTiffWriter.LevelSpec(32, 32, 1, 1, 8, false, true, "0 0 0")), 3857, 1.0, 0.0, 0.0);
+        try (CogReader r = CogReader.open(new InMemoryByteSource(tiff))) {
+            assertEquals("0 0 0", r.info().noData);
+            assertEquals(TransparencyPolicy.BLACK_NEAR, r.transparencyPolicy());
+            BufferedImage keyed = r.getTile(0, 0, 0);
+            assertEquals(0, keyed.getRGB(0, 0) >>> 24, "black block transparent by default");
+            assertEquals(255, keyed.getRGB(4, 0) >>> 24, "red block opaque");
+            r.setTransparencyPolicy(TransparencyPolicy.METADATA);
+            assertEquals(0, r.getTile(0, 0, 0).getRGB(0, 0) >>> 24, "nodata declares black");
+            r.setTransparencyPolicy(TransparencyPolicy.NONE);
+            BufferedImage opaque = r.getTile(0, 0, 0);
+            assertEquals(255, opaque.getRGB(0, 0) >>> 24, "policy off: opaque again");
+            assertEquals(0, opaque.getRGB(0, 0) & 0xFF, "still black under the alpha");
+            // each policy keeps its own decoded tiles: back to the first one
+            r.setTransparencyPolicy(TransparencyPolicy.BLACK_NEAR);
+            BufferedImage again = r.getTile(0, 0, 0);
+            assertEquals(0, again.getRGB(0, 0) >>> 24, "cached keyed tile reused");
+        }
     }
 
     private static byte[] readFile(String name) throws IOException {

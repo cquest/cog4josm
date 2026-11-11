@@ -134,7 +134,7 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   pays for the full-resolution tables (measured `/big.tif`: open stays
   at 3 requests / 65,664 bytes while 178 KiB of tables wait).
   The requested range is also echoed inside the User-Agent comment
-  (`cog4josm/0.4.0 (…; range=a-b)`) because plain access logs do not
+  (`cog4josm/0.5.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
   Each tile fetch window is padded by a speculative ring of one source
   tile (`RING_TILES`, phase 2.7 E1: ring tiles join the decoded-tile
@@ -590,7 +590,27 @@ no request-count change). Multi-range GET (multipart 206) stays
 rejected: uneven server support, parser complexity, and RangePlanner
 already merges what is contiguous.
 
-Phase 3 : transform black/near black pixels as alpha transparency
+Phase 3 (done): black-to-alpha transparency for RGB sources without
+alpha. `TransparencyPolicy` (reader package): NONE / METADATA (only when
+GDAL_NODATA tag 42113 declares black) / BLACK_NEAR (default: `max(r,g,b)
+<= 8` — the slack absorbs JPEG ringing) — applied by `CogInfo.Level.
+isRgbNoAlpha()` (photometric 2 with three 8-bit samples and no
+ExtraSamples, or YCbCr 6; grey and RGBA levels are never touched). The
+key-out happens in `TileDecoder.decode` while decoding (ARGB fill loop on
+the raw RGB path, post-pass `blackToTransparent` on the JPEG path —
+ImageIO never returns alpha); `CogComposer` propagates the alpha as-is
+(its bilinear sampler is alpha-weighted). The policy is carried by
+`CogReader` (volatile, settable at runtime); the decoded-tile LRU keys
+include the policy name, so toggling never re-fetches tiles a previous
+policy had decoded. `CogTileSource.cacheKey` also carries the policy
+name: JCS composed tiles can never mix policies. The layer menu gets a
+cycling entry ("Transparency of black pixels": on → metadata → off,
+JOSM r19678 `getMenuEntries()` is plain `Action[]`, no submenu) that
+toggles the reader, persists the choice in the `cog.transparency`
+preference (default `black_near`, read at layer creation) and calls
+`clearTileCache()` + `invalidate()`. Fixtures: `TestTiffWriter`
+LevelSpec gained `checker` (4 px black/red blocks) and `noData` (writes
+42113 ASCII); `/black.tif` is the end-to-end RGB checker COG.
 
 Final Phase : publication on the JOSM plugin list (requires an up-to-date
 `Plugin-Mainversion` and JOSM javadoc/checkstyle if upstreamed).

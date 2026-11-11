@@ -44,7 +44,7 @@ public final class HttpRangeReader implements ByteSource {
      * asked for - debug aid only, the Range header itself is of course sent.
      */
     private static final String USER_AGENT_PREFIX =
-            "cog4josm/0.4.0 (JOSM COG plugin; https://josm.openstreetmap.de";
+            "cog4josm/0.5.0 (JOSM COG plugin; https://josm.openstreetmap.de";
 
     private final HttpClient client;
     private final URI uri;

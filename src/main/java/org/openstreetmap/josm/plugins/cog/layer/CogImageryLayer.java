@@ -1,8 +1,13 @@
 package org.openstreetmap.josm.plugins.cog.layer;
 
+import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 
 import org.apache.commons.jcs3.access.behavior.ICacheAccess;
 import org.openstreetmap.gui.jmapviewer.interfaces.TileLoader;
@@ -11,7 +16,11 @@ import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.data.imagery.TileLoaderFactory;
 import org.openstreetmap.josm.gui.layer.AbstractCachedTileSourceLayer;
 import org.openstreetmap.josm.plugins.cog.reader.CogReader;
+import org.openstreetmap.josm.plugins.cog.reader.TransparencyPolicy;
+import org.openstreetmap.josm.spi.preferences.Config;
 import org.openstreetmap.josm.tools.Logging;
+
+import static org.openstreetmap.josm.tools.I18n.tr;
 
 /**
  * Background layer displaying a remote COG. Reuses all the machinery of JOSM
@@ -25,6 +34,12 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
     /** JCS region of composed display tiles (shared with the JOSM cache manager). */
     private static final String CACHE_NAME = "cog";
 
+    /**
+     * JOSM preference holding the default transparency policy for newly
+     * opened COG layers: "black_near" (default), "metadata" or "none".
+     */
+    static final String TRANSPARENCY_PREF_KEY = "cog.transparency";
+
     private final CogReader reader;
     private final CogTileSource tileSource;
     private volatile CogTileLoader cogLoader;
@@ -32,7 +47,74 @@ public class CogImageryLayer extends AbstractCachedTileSourceLayer<CogTileSource
     public CogImageryLayer(ImageryInfo info, CogReader reader) {
         super(info);
         this.reader = reader;
+        reader.setTransparencyPolicy(defaultTransparencyPolicy());
         this.tileSource = new CogTileSource(info, reader);
+    }
+
+    /** Default policy for a new layer: the "cog.transparency" preference. */
+    private static TransparencyPolicy defaultTransparencyPolicy() {
+        try {
+            return TransparencyPolicy.fromConfigName(
+                    Config.getPref().get(TRANSPARENCY_PREF_KEY, TransparencyPolicy.BLACK_NEAR.configName()));
+        } catch (Throwable t) { // NOSONAR: preferences are unavailable in some test setups
+            return TransparencyPolicy.BLACK_NEAR;
+        }
+    }
+
+    /**
+     * Layer menu: the base entries plus a cycling "Transparency of black
+     * pixels" entry (off → metadata only → near black → off). Changing it
+     * re-decodes through the reader (each policy keeps its own decoded
+     * tiles), drops this layer's composed tile cache and repaints; the
+     * choice also becomes the default for layers opened later.
+     */
+    @Override
+    public Action[] getMenuEntries() {
+        Action[] base = super.getMenuEntries();
+        Action[] entries = Arrays.copyOf(base, base.length + 1);
+        entries[base.length] = new AbstractAction(transparencyMenuItemLabel()) {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                TransparencyPolicy next;
+                switch (reader.transparencyPolicy()) {
+                    case METADATA:
+                        next = TransparencyPolicy.NONE;
+                        break;
+                    case NONE:
+                        next = TransparencyPolicy.BLACK_NEAR;
+                        break;
+                    default:
+                        next = TransparencyPolicy.METADATA;
+                        break;
+                }
+                reader.setTransparencyPolicy(next);
+                try {
+                    Config.getPref().put(TRANSPARENCY_PREF_KEY, next.configName());
+                } catch (Throwable t) { // NOSONAR: a missing preference must not break the toggle
+                    Logging.warn("cannot remember the transparency policy: {0}", t);
+                }
+                putValue(Action.NAME, transparencyMenuItemLabel());
+                clearTileCache();
+                invalidate();
+            }
+        };
+        return entries;
+    }
+
+    private String transparencyMenuItemLabel() {
+        String state;
+        switch (reader.transparencyPolicy()) {
+            case NONE:
+                state = tr("off");
+                break;
+            case METADATA:
+                state = tr("metadata only");
+                break;
+            default:
+                state = tr("on (near black)");
+                break;
+        }
+        return tr("Transparency of black pixels") + ": " + state;
     }
 
     @Override

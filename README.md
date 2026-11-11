@@ -64,20 +64,29 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 * The composed 256 px display tiles go into **JOSM's own imagery tile
   cache** (the "cog" JCS region: JOSM memory management and disk tile
   cache, purged by the usual JOSM actions). Keys combine a fingerprint of
-  the source (URL + size + ETag) with z/x/y, so a changed file never
-  serves stale tiles; error and empty tiles are never cached.
+  the source (URL + size + ETag), the transparency policy and z/x/y, so a
+  changed file never serves stale tiles; error and empty tiles are never
+  cached.
+* Black-to-alpha transparency: sources with RGB (or JPEG YCbCr) pixels and
+  no alpha channel get their near-black pixels rendered transparent —
+  channels ≤ 8 by default (absorbs JPEG fringes), or only when the file
+  declares `GDAL_NODATA` black. On by default; toggle per layer in its
+  menu ("Transparency of black pixels"), or globally with the
+  `cog.transparency` preference (`black_near` / `metadata` / `none`).
+  Grey and alpha-carrying sources are never touched.
 * Minimal dependencies: **JDK + JOSM API only**. The plugin jar contains no
   third-party code (GPL v2+ only). CRS parameters always come from the file
   itself (GeoKeys) or from the projection table shipped by JOSM — the
   plugin embeds and downloads no EPSG database of its own; models the
   plugin cannot compute are refused.
 
-## Status (v0.4)
+## Status (v0.5)
 
 | Feature | Status |
 |---|---|
 | Byte-range reads, head + tail blocks at open (no probe) | ✅ |
 | Tile tables fetched lazily, per level, on first use | ✅ |
+| Black-to-alpha transparency (RGB sources without alpha) | ✅ (phase 3) |
 | Small ranges merged into block requests | ✅ |
 | Speculative tile ring + base overview prefetch | ✅ |
 | Persistent metadata + conditional GET (304 on reopen) | ✅ |

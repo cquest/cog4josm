@@ -12,8 +12,22 @@ public final class TestTiffWriter {
 
     static final int TILE = 16;
 
-    public record LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey) {
+    public record LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey,
+                            boolean checker, String noData) {
+
+        public LevelSpec(int width, int height, int compression, int predictor, int bits, boolean grey) {
+            this(width, height, compression, predictor, bits, grey, false, null);
+        }
+
+        public LevelSpec {
+            if (checker && (grey || bits != 8 || predictor != 1 || compression != 1)) {
+                throw new IllegalArgumentException("checker content needs uncompressed 8-bit RGB");
+            }
+        }
     }
+
+    /** Checker content: opaque red next to black (the phase 3 fixture). */
+    private static final int[] CHECKER_RGB = {210, 30, 40};
 
     /** Reference pixel: deterministic function of image coordinates. */
     static int pix(int x, int y, int channel, int bits) {
@@ -83,7 +97,9 @@ public final class TestTiffWriter {
         // then the IFDs at the very end
         int[] entries = new int[nl];
         for (int i = 0; i < nl; i++) {
-            entries[i] = 13 + (i == 0 ? 3 + (nCustomKeys > 0 ? 2 : 0) : 0);
+            entries[i] = 13 + (i == 0
+                    ? 3 + (nCustomKeys > 0 ? 2 : 0) + (levels.get(0).noData() != null ? 1 : 0)
+                    : 0);
         }
         long[] ifdOff = new long[nl];
         long[] extOff = new long[nl];
@@ -164,6 +180,9 @@ public final class TestTiffWriter {
         if (!lv.grey()) {
             s += 6; // 3 SHORT bitsPerSample
         }
+        if (lv.noData() != null) {
+            s += lv.noData().length() + 1; // ASCII 42113 with its NUL
+        }
         return s;
     }
 
@@ -184,7 +203,8 @@ public final class TestTiffWriter {
         // PIX4Dmatic) must keep exactly the same byte layout
         boolean custom = i == 0 && nCustomKeys > 0;
         long bpsOff = ext + 8L * n;
-        long geoBase = bpsOff + (lv.grey() ? 0 : 6);
+        long noDataOff = bpsOff + (lv.grey() ? 0 : 6);
+        long geoBase = noDataOff + (i == 0 && lv.noData() != null ? lv.noData().length() + 1 : 0);
         List<long[]> es = new ArrayList<>();
         es.add(e(254, 3, 1, i == 0 ? 0 : 1));
         es.add(e(256, 3, 1, lv.width()));
@@ -210,6 +230,10 @@ public final class TestTiffWriter {
             if (custom) {
                 es.add(e(34736, 12, nCustomDbl, geoBase + 72 + 2L * nCustomKeys));
                 es.add(e(34737, 2, CITATION.length(), geoBase + 72 + 2L * nCustomKeys + 8L * nCustomDbl));
+            }
+            if (lv.noData() != null) {
+                // GDAL_NODATA (42113): ASCII, count includes the NUL
+                es.add(e(42113, 2, lv.noData().length() + 1, noDataOff));
             }
         }
         out.write(leU16(es.size()));
@@ -237,6 +261,12 @@ public final class TestTiffWriter {
             for (int s = 0; s < 3; s++) {
                 out.write(leU16(lv.bits()));
             }
+        }
+        if (i == 0 && lv.noData() != null) {
+            for (byte b : lv.noData().getBytes(java.nio.charset.StandardCharsets.US_ASCII)) {
+                out.write(b);
+            }
+            out.write(0);
         }
         if (i == 0) {
             writeDoubles(out, new double[]{scaleX, scaleX, 0});
@@ -314,10 +344,16 @@ public final class TestTiffWriter {
                 int gx = tx * TILE + x;
                 int gy = ty * TILE + y;
                 for (int s = 0; s < samples; s++) {
-                    int v = pix(gx, gy, s, lv.bits());
-                    if (lv.predictor() == 2) {
-                        int left = x == 0 ? 0 : pix(gx - 1, gy, s, lv.bits());
-                        v = (v - left) & ((1 << lv.bits()) - 1);
+                    int v;
+                    if (lv.checker()) {
+                        // 4 px blocks: black vs red (black-to-alpha fixture)
+                        v = (((gx >> 2) + (gy >> 2)) & 1) == 0 ? 0 : CHECKER_RGB[s];
+                    } else {
+                        v = pix(gx, gy, s, lv.bits());
+                        if (lv.predictor() == 2) {
+                            int left = x == 0 ? 0 : pix(gx - 1, gy, s, lv.bits());
+                            v = (v - left) & ((1 << lv.bits()) - 1);
+                        }
                     }
                     if (bytes == 2) {
                         // little-endian file ('II'): least significant byte first

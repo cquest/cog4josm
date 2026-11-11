@@ -18,6 +18,9 @@ import java.awt.image.BufferedImage;
  * none (1), JPEG (6), deflate (8/32946), LZW (5), PackBits (32773).
  * Supports Grey, Grey+Alpha, RGB, RGBA, 8 and 16 bits, horizontal predictor.
  * Extra samples (ExtraSamples, GDAL mask) are handled as alpha.
+ * Black-to-alpha ({@link TransparencyPolicy}) is applied here, while
+ * decoding: on the raw RGB path by filling an ARGB image, on the JPEG path
+ * (RGB or YCbCr through ImageIO) by a post-pass on the decoded tile.
  */
 public final class TileDecoder {
 
@@ -43,8 +46,19 @@ public final class TileDecoder {
     }
 
     public static BufferedImage decode(CogInfo.Level level, byte[] raw) throws IOException {
+        return decode(level, raw, false);
+    }
+
+    /**
+     * Decodes one tile; when {@code blackToAlpha} (see {@link
+     * TransparencyPolicy}) the near-black pixels of this RGB-without-alpha
+     * level get alpha 0: the returned image is then ARGB, and the composer
+     * propagates the transparency as-is.
+     */
+    public static BufferedImage decode(CogInfo.Level level, byte[] raw, boolean blackToAlpha) throws IOException {
         if (raw.length >= 2 && (raw[0] & 0xFF) == 0xFF && (raw[1] & 0xD8) == 0xD8) {
-            return decodeJpeg(withJpegTables(raw, level.jpegTables), level);
+            BufferedImage img = decodeJpeg(withJpegTables(raw, level.jpegTables), level);
+            return blackToAlpha ? blackToTransparent(img) : img;
         }
         long maxPx = expectedRasterBytes(level);
         byte[] px;
@@ -68,7 +82,29 @@ public final class TileDecoder {
         if (level.predictor == 2) {
             applyHorizontalPredictor(px, level);
         }
-        return toImage(px, level);
+        return toImage(px, level, blackToAlpha);
+    }
+
+    /**
+     * Post-pass of the JPEG path (ImageIO never returns alpha for JPEG,
+     * whatever the photometric): near-black pixels become fully transparent,
+     * every other pixel stays opaque.
+     */
+    static BufferedImage blackToTransparent(BufferedImage src) {
+        int w = src.getWidth();
+        int h = src.getHeight();
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int argb = src.getRGB(x, y);
+                int r = (argb >> 16) & 0xFF;
+                int g = (argb >> 8) & 0xFF;
+                int b = argb & 0xFF;
+                int a = TransparencyPolicy.nearBlack(r, g, b) ? 0 : 255;
+                out.setRGB(x, y, (a << 24) | (argb & 0x00FFFFFF));
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- JPEG
@@ -381,7 +417,7 @@ public final class TileDecoder {
 
     // ---------------------------------------------------------------- raster -> image
 
-    private static BufferedImage toImage(byte[] px, CogInfo.Level level) throws IOException {
+    private static BufferedImage toImage(byte[] px, CogInfo.Level level, boolean blackToAlpha) throws IOException {
         int b = level.bitsPerSample[0];
         int w = level.tileWidth;
         int h = level.tileHeight;
@@ -454,14 +490,19 @@ public final class TileDecoder {
                 if (spp == 3 || (spp == 4 && hasAlpha)) {
                     // the 4th sample is the alpha only when 4 samples are stored
                     boolean alpha = spp == 4;
-                    BufferedImage img = new BufferedImage(w, h, alpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+                    // black-to-alpha (phase 3): an ARGB image with the alpha
+                    // set during the fill loop, never a second pass
+                    boolean key = !alpha && blackToAlpha;
+                    BufferedImage img = new BufferedImage(w, h,
+                            alpha || key ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
                     for (int y = 0; y < h; y++) {
                         for (int x = 0; x < w; x++) {
                             int off = (y * w + x) * stride;
                             int r = px[off] & 0xFF;
                             int g = px[off + 1] & 0xFF;
                             int bl = px[off + 2] & 0xFF;
-                            int a = alpha ? px[off + 3] & 0xFF : 255;
+                            int a = alpha ? px[off + 3] & 0xFF
+                                    : key && TransparencyPolicy.nearBlack(r, g, bl) ? 0 : 255;
                             img.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | bl);
                         }
                     }

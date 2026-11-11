@@ -55,6 +55,7 @@ class HttpRangeReaderTest {
         server.createContext("/image.tif", this::serve);
         server.createContext("/tail.tif", this::serveTail);
         server.createContext("/big.tif", this::serveBig);
+        server.createContext("/black.tif", this::serveBlack);
         server.createContext("/noranges.tif", this::serveNoRange);
         server.createContext("/huge200.tif", this::serveHuge200);
         server.createContext("/badrange.tif", this::serveBadRange);
@@ -79,6 +80,11 @@ class HttpRangeReaderTest {
     /** Deep-pyramid header-tail COG: huge tile tables outside the tail block. */
     private void serveBig(HttpExchange ex) throws IOException {
         serveBytes(ex, bigBytes(), bigEtag());
+    }
+
+    /** RGB checker COG: the black-to-alpha transparency fixture. */
+    private void serveBlack(HttpExchange ex) throws IOException {
+        serveBytes(ex, blackBytes(), blackEtag());
     }
 
     private void serveBytes(HttpExchange ex, byte[] tiff, String etag) throws IOException {
@@ -194,6 +200,7 @@ class HttpRangeReaderTest {
     private static String testEtag;
     private static String tailEtag;
     private static String bigEtag;
+    private static String blackEtag;
 
     private static String testEtag() {
         if (testEtag == null) {
@@ -214,6 +221,13 @@ class HttpRangeReaderTest {
             bigEtag = etagOf(bigBytes());
         }
         return bigEtag;
+    }
+
+    private static String blackEtag() {
+        if (blackEtag == null) {
+            blackEtag = etagOf(blackBytes());
+        }
+        return blackEtag;
     }
 
     private static String etagOf(byte[] t) {
@@ -280,6 +294,25 @@ class HttpRangeReaderTest {
 
     private static byte[] bigTiff;
 
+    /**
+     * RGB black-to-alpha fixture (phase 3): 64x64 uncompressed RGB checker
+     * (4 px blocks: black vs red) declaring GDAL_NODATA "0 0 0".
+     */
+    private static byte[] blackBytes() {
+        if (blackTiff == null) {
+            try {
+                blackTiff = TestTiffWriter.write(List.of(
+                        new TestTiffWriter.LevelSpec(64, 64, 1, 1, 8, false, true, "0 0 0")),
+                        3857, 10.0, 500000.0, 6250000.0);
+            } catch (IOException e) {
+                throw new AssertionError(e);
+            }
+        }
+        return blackTiff;
+    }
+
+    private static byte[] blackTiff;
+
     private String url(String path) {
         return "http://127.0.0.1:" + port + path;
     }
@@ -319,7 +352,7 @@ class HttpRangeReaderTest {
         assertEquals(rangeRequests.size(), userAgents.size());
         for (int i = 0; i < rangeRequests.size(); i++) {
             String ua = userAgents.get(i);
-            assertEquals("cog4josm/0.4.0 (JOSM COG plugin; https://josm.openstreetmap.de; range="
+            assertEquals("cog4josm/0.5.0 (JOSM COG plugin; https://josm.openstreetmap.de; range="
                     + rangeRequests.get(i).substring("bytes=".length()) + ")", ua);
             assertTrue(ua.chars().allMatch(c -> c >= 0x20 && c <= 0x7E), "header stays ASCII: " + ua);
         }
@@ -608,6 +641,34 @@ class HttpRangeReaderTest {
                 assertTrue(rangeBytes.get() - bytesBefore < 4096,
                         "the L0 table stays in the metadata cache: raster only");
             }
+        }
+    }
+
+    @Test
+    void blackIsTransparentByDefaultOnRgbSources() throws IOException {
+        // phase 3: the fixture is uncompressed RGB without alpha (4 px
+        // black/red checker) declaring GDAL_NODATA "0 0 0"; black_near is
+        // the default policy of every reader
+        MetadataCache.global().clearAll();
+        try (CogReader r = CogReader.open(url("/black.tif"))) {
+            assertEquals("0 0 0", r.info().noData);
+            // tile (1,1) covers image pixels 16..31: (16,16) is a black
+            // checker block, (22,16) a red one
+            BufferedImage t = r.getTile(0, 1, 1);
+            assertEquals(0, t.getRGB(0, 0) >>> 24, "black keyed out by default");
+            int red = t.getRGB(6, 0);
+            assertEquals(255, red >>> 24, "red stays opaque");
+            assertEquals(210, (red >> 16) & 0xFF);
+            assertEquals(30, (red >> 8) & 0xFF);
+            assertEquals(40, red & 0xFF);
+            // metadata policy: the declared nodata is black, same result
+            r.setTransparencyPolicy(TransparencyPolicy.METADATA);
+            assertEquals(0, r.getTile(0, 1, 1).getRGB(0, 0) >>> 24);
+            // off: the 0.4.0 behaviour again, pixels still black underneath
+            r.setTransparencyPolicy(TransparencyPolicy.NONE);
+            BufferedImage opaque = r.getTile(0, 1, 1);
+            assertEquals(255, opaque.getRGB(0, 0) >>> 24);
+            assertEquals(0x000000, opaque.getRGB(0, 0) & 0xFFFFFF);
         }
     }
 }

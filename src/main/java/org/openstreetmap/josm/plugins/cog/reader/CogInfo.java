@@ -119,6 +119,28 @@ public final class CogInfo {
             return tx >= 0 && ty >= 0 && tx < numXTiles() && ty < numYTiles();
         }
 
+        /**
+         * True when this level is RGB with no alpha channel: photometric RGB
+         * (2) with three 8-bit samples and no ExtraSamples, or YCbCr (6, the
+         * JPEG-compressed variant which ImageIO always turns into full RGB).
+         * Only such levels are candidates for black-to-alpha transparency
+         * (phase 3, {@link TransparencyPolicy}); grey levels and levels that
+         * already carry alpha are never touched.
+         */
+        public boolean isRgbNoAlpha() {
+            if (samplesPerPixel != 3 || extraSamples.length != 0
+                    || (photometric != 2 && photometric != 6)
+                    || bitsPerSample.length == 0) {
+                return false;
+            }
+            for (int bps : bitsPerSample) {
+                if (bps != 8) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public long tileOffset(int tx, int ty) throws IOException {
             ensureTileArrays();
             return tileOffsets[(int) ((long) ty * numXTiles() + tx)];
