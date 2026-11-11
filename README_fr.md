@@ -44,7 +44,10 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 * Lecture spéculative d'en-tête : l'ouverture d'une source HTTP n'émet
   qu'une seule requête `bytes=0-32767`, qui prouve le support de `Range:`
   (plus de requête de sonde), révèle taille et ETag, et apporte en un aller
-  simple l'en-tête, les IFD et les GeoKeys d'un COG bien agencé.
+  simple l'en-tête, les IFD et les GeoKeys d'un COG bien agencé. Pour un
+  COG header-tail (agencement GDAL par défaut : IFD en fin de fichier),
+  une seconde requête spéculative couvre les 32 KiB finaux — deux requêtes
+  par ouverture dans tous les cas, jamais une par IFD.
 * Cache LRU des **seules métadonnées** (en-tête, IFD, tables de décalages de
   tuiles), validé par taille/ETag et consulté par containment (un bloc plus
   grand sert les lectures plus petites) : une réouverture du même COG ne
@@ -74,7 +77,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 
 | Fonctionnalité | État |
 |---|---|
-| Lecture byte-ranges, une seule lecture tête à l'ouverture | ✅ |
+| Lecture byte-ranges, blocs tête + queue à l'ouverture | ✅ |
 | Groupement des petites plages en requêtes par bloc | ✅ |
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |

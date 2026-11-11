@@ -121,6 +121,12 @@ export JAVA_HOME=~/tools/jdk-21.0.13+9   # local JDK 21 (JDK 17+ required)
   tiles are fetched coalesced and kept only as decoded images (`CogReader`
   cache). Measured on `test_data/cog-paris-3857.tif` over local HTTP: first
   open went from 14 requests (probe + 13 metadata) to 1 head read.
+  Header-tail COGs (GDAL driver default: tiles first, IFDs last) keep
+  their metadata OUTSIDE that head block: a metadata miss at
+  `offset >= size - 32 KiB` triggers one speculative **tail block** read
+  of the same size (`HttpRangeReader.knownSize` — never a probe), cached
+  and persisted exactly like the head. Measured on the `/tail.tif`
+  fixture: exactly 2 requests per open in every layout.
   The requested range is also echoed inside the User-Agent comment
   (`cog4josm/0.4.0 (…; range=a-b)`) because plain access logs do not
   record the `Range:` header — debug aid, nothing parses it.
@@ -530,7 +536,8 @@ purged by JOSM's image-cache rules — metadata does not fit it. Instead
 `reader/FileMetadataStore` (JDK-only): one file per URL
 (`<plugin>-<sha256(url)>.cogmeta`, text header `cogmeta1/size/etag` +
 binary records) under `getPluginDirs().getCacheDirectory(true)`,
-attached by `CogPlugin` to the global MetadataCache (mirror on open,
+attached by `CogPlugin` to the global MetadataCache (mirror after the
+parse — so a speculative tail block is persisted too —,
 transparent load on memory miss, dropped with the fingerprint). Opens
 revalidate through `HttpRangeReader.conditionalHeadRead` (`GET
 If-None-Match` on the 32 KiB head read): 304 = one request, ZERO body
@@ -539,10 +546,19 @@ Measured (ReopenCount probe, `cog-paris-3857.tif`, two JVM runs sharing
 one store): second-session open 1 request / 32768 bytes -> 1 request /
 0 bytes. Caps: 4 MiB per file, 1 MiB per block, 16 MiB per directory
 (oldest pruned); corrupt files are ignored, writes are atomic, all IO
-best-effort. Follow-ups for hostile layouts only: lazy per-level IFD
-parsing, or a speculative tail read (last 32 KiB) when the parser sees
-offsets outside the head block (header-tail COGs, tile-offset arrays
-bigger than the head).
+best-effort. Follow-ups for hostile layouts: the speculative tail read
+shipped right after (see the next paragraph); lazy per-level IFD
+parsing stays open.
+
+Phase 2.8 follow-up (done): speculative tail read for header-tail COGs.
+`MetadataCachingSource.read`, on a metadata miss at `offset >= size -
+32 KiB`, fetches the last 32 KiB in ONE request (size from
+`HttpRangeReader.knownSize()`, no probe) and slices from it; the block
+goes into the metadata cache and — since `mirrorToStore` now runs AFTER
+`TiffParser.parse` — into the store. Fixture `/tail.tif`
+(`TestTiffWriter.writeTail`, IFDs at EOF): open = exactly 2 requests
+(`bytes=0-32767` + last 32 KiB), reopen with store = one 304, zero body
+bytes, IFD chain parsed from disk.
 
 Marginal items, take only in passing: in-flight byte-range dedup
 between concurrent tile jobs (the tile LRU already covers most cases),

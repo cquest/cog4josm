@@ -35,6 +35,23 @@ final class MetadataCachingSource implements ByteSource {
         if (hit != null) {
             return hit;
         }
+        long size = http.knownSize();
+        if (size > CogReader.HEAD_READ_BYTES && offset >= size - CogReader.HEAD_READ_BYTES) {
+            // header-tail COG (the GDAL driver's default layout): the IFDs and
+            // the tile-offset tables sit at the very end of the file, outside
+            // the speculative head read. One extra request fetches the whole
+            // tail block, exactly like the head block, so the rest of the
+            // parse is sliced from cache (and persisted for the next session)
+            // instead of one request per IFD.
+            long blockOffset = size - CogReader.HEAD_READ_BYTES;
+            byte[] block = http.read(blockOffset, CogReader.HEAD_READ_BYTES);
+            MetadataCache.global().store(url, blockOffset, block);
+            int from = (int) (offset - blockOffset);
+            int len = Math.min(length, block.length - from);
+            byte[] slice = new byte[len];
+            System.arraycopy(block, from, slice, 0, len);
+            return slice;
+        }
         byte[] data = http.read(offset, length);
         // stored under its actual byte count: a body clamped at the end of
         // the file must not be recorded as the longer range we asked for

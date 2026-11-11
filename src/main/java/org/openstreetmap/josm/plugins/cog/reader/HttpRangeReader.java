@@ -80,6 +80,17 @@ public final class HttpRangeReader implements ByteSource {
         return etag;
     }
 
+    /**
+     * Total size revealed by the 206 answers so far — never sends a probe,
+     * -1 while nothing has been learned from the wire. After the speculative
+     * head read of {@link CogReader#open} the size is always known, which is
+     * what lets {@link MetadataCachingSource} place its speculative tail
+     * block without an extra round-trip.
+     */
+    long knownSize() {
+        return size;
+    }
+
     @Override
     public long size() throws IOException {
         probe();

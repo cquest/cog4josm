@@ -53,6 +53,7 @@ class HttpRangeReaderTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         port = server.getAddress().getPort();
         server.createContext("/image.tif", this::serve);
+        server.createContext("/tail.tif", this::serveTail);
         server.createContext("/noranges.tif", this::serveNoRange);
         server.createContext("/huge200.tif", this::serveHuge200);
         server.createContext("/badrange.tif", this::serveBadRange);
@@ -66,17 +67,25 @@ class HttpRangeReaderTest {
     }
 
     private void serve(HttpExchange ex) throws IOException {
+        serveBytes(ex, cogBytes(), testEtag());
+    }
+
+    /** Header-tail layout COG: IFDs and tables at the very end of the file. */
+    private void serveTail(HttpExchange ex) throws IOException {
+        serveBytes(ex, tailBytes(), tailEtag());
+    }
+
+    private void serveBytes(HttpExchange ex, byte[] tiff, String etag) throws IOException {
         try {
-            byte[] tiff = cogBytes();
             String range = ex.getRequestHeaders().getFirst("Range");
             if (range != null && range.startsWith("bytes=")) {
                 rangeRequests.add(range);
                 userAgents.add(ex.getRequestHeaders().getFirst("User-Agent"));
                 rangeHits.incrementAndGet(); // a 304 is still a request
             }
-            ex.getResponseHeaders().add("ETag", testEtag());
+            ex.getResponseHeaders().add("ETag", etag);
             String inm = ex.getRequestHeaders().getFirst("If-None-Match");
-            if (inm != null && inm.contains(testEtag())) {
+            if (inm != null && inm.contains(etag)) {
                 conditionalHits.incrementAndGet();
                 notModified.incrementAndGet();
                 ex.sendResponseHeaders(304, -1);
@@ -177,19 +186,30 @@ class HttpRangeReaderTest {
 
     /** Strong ETag of the fixture, as a real COG host would serve one. */
     private static String testEtag;
+    private static String tailEtag;
 
     private static String testEtag() {
         if (testEtag == null) {
-            try {
-                byte[] t = cogBytes();
-                testEtag = '"' + java.util.HexFormat.of().formatHex(
-                        java.security.MessageDigest.getInstance("SHA-256").digest(t))
-                        .substring(0, 16) + '"';
-            } catch (java.security.NoSuchAlgorithmException e) {
-                throw new IllegalStateException(e);
-            }
+            testEtag = etagOf(cogBytes());
         }
         return testEtag;
+    }
+
+    private static String tailEtag() {
+        if (tailEtag == null) {
+            tailEtag = etagOf(tailBytes());
+        }
+        return tailEtag;
+    }
+
+    private static String etagOf(byte[] t) {
+        try {
+            return '"' + java.util.HexFormat.of().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256").digest(t))
+                    .substring(0, 16) + '"';
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private static byte[] cogBytes() {
@@ -197,6 +217,23 @@ class HttpRangeReaderTest {
             return TestTiffWriter.write(List.of(
                     new TestTiffWriter.LevelSpec(64, 64, 8, 1, 8, false),
                     new TestTiffWriter.LevelSpec(32, 32, 8, 1, 8, false)),
+                    3857, 10.0, 500000.0, 6250000.0);
+        } catch (IOException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /**
+     * Header-tail fixture: three uncompressed levels (~212 KiB of tiles at
+     * the head, IFDs and offset tables in the last ~3 KiB), far too big for
+     * the 32 KiB head read to reach the metadata.
+     */
+    private static byte[] tailBytes() {
+        try {
+            return TestTiffWriter.writeTail(List.of(
+                    new TestTiffWriter.LevelSpec(256, 256, 1, 1, 8, false),
+                    new TestTiffWriter.LevelSpec(64, 64, 1, 1, 8, false),
+                    new TestTiffWriter.LevelSpec(16, 16, 1, 1, 8, false)),
                     3857, 10.0, 500000.0, 6250000.0);
         } catch (IOException e) {
             throw new AssertionError(e);
@@ -421,6 +458,69 @@ class HttpRangeReaderTest {
             assertNotNull(fresh);
             assertEquals(cogBytes().length, fresh.size(), "store rewritten with the real file");
             assertEquals(testEtag(), fresh.etag());
+        } finally {
+            MetadataCache.global().attachStore(null);
+            try (var walk = Files.walk(dir)) {
+                for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+            }
+        }
+    }
+
+    @Test
+    void headerTailCogOpensWithTwoRequests() throws IOException {
+        // GDAL header-tail layout: the IFDs sit at the very end, outside the
+        // 32 KiB head read; one speculative tail block (same size as the
+        // head) brings every metadata byte, so no per-IFD request follows
+        MetadataCache.global().clearAll();
+        byte[] tiff = tailBytes();
+        assertTrue(tiff.length > CogReader.HEAD_READ_BYTES, "fixture must not fit the head read");
+        long tailStart = tiff.length - CogReader.HEAD_READ_BYTES;
+        try (CogReader r = CogReader.open(url("/tail.tif"))) {
+            assertEquals(3857, r.info().crsCode);
+            assertEquals(3, r.info().levelCount());
+            assertEquals(List.of("bytes=0-" + (CogReader.HEAD_READ_BYTES - 1),
+                    "bytes=" + tailStart + "-" + (tiff.length - 1)), rangeRequests,
+                    "head read + one speculative tail block, nothing else");
+            BufferedImage img = r.getTile(0, 8, 8);
+            assertEquals(16, img.getWidth(), "tile offsets parsed from the tail block");
+            // the 3x3 fetch window (tile + speculative ring) spans three
+            // rows whose gaps exceed FETCH_MAX_GAP: at most one request/row
+            assertTrue(rangeHits.get() <= 2 + 3, "raster fetch stays merged: " + rangeHits.get());
+        }
+    }
+
+    @Test
+    void headerTailReopensWithOneConditionalRequest() throws IOException {
+        // the tail block is persisted (mirrorToStore runs after the parse),
+        // so a "new session" revalidates with one 304 and parses the whole
+        // header-tail IFD chain from the store: zero body bytes
+        Path dir = Files.createTempDirectory("cogmeta-tail");
+        FileMetadataStore store = new FileMetadataStore(dir, "test");
+        MetadataCache cache = MetadataCache.global();
+        String url = url("/tail.tif");
+        try {
+            cache.clearAll();
+            cache.attachStore(store);
+            try (CogReader r = CogReader.open(url)) {
+                assertEquals(3857, r.info().crsCode);
+                assertEquals(2, rangeHits.get(), "first open: head read + tail block");
+                long size = tailBytes().length;
+                assertTrue(store.loadBlocks(url).stream()
+                                .anyMatch(p -> p.offset() + p.data().length == size),
+                        "tail block reached the store: one persisted block ends at EOF");
+            }
+            cache.clearAll(); // simulate a JOSM restart
+            int reqBefore = rangeHits.get();
+            long bytesBefore = rangeBytes.get();
+            try (CogReader r = CogReader.open(url)) {
+                assertEquals(3857, r.info().crsCode, "IFD chain parsed from the persisted tail block");
+                assertEquals(1, rangeHits.get() - reqBefore, "one conditional request");
+                assertEquals(1, conditionalHits.get(), "If-None-Match was sent");
+                assertEquals(1, notModified.get(), "the server answered 304");
+                assertEquals(0, rangeBytes.get() - bytesBefore, "zero body bytes on reopen");
+            }
         } finally {
             MetadataCache.global().attachStore(null);
             try (var walk = Files.walk(dir)) {

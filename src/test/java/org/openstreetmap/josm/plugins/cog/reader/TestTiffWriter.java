@@ -26,12 +26,28 @@ public final class TestTiffWriter {
     }
 
     /**
+     * Header-tail layout (GDAL COG driver style): tile data first, then the
+     * external arrays and the IFDs at the very end of the file — the first
+     * IFD is near the tail, far outside a 32 KiB head read.
+     */
+    public static byte[] writeTail(List<LevelSpec> levels, int crs, double scaleX, double originX, double originY)
+            throws java.io.IOException {
+        return write(levels, crs, null, null, scaleX, originX, originY, true);
+    }
+
+    /**
      * Variant with "user-defined" GeoKeys: {@code customKeys} is the complete
      * content of the 34735 directory (4-short header + entries), {@code customDoubles}
      * the DOUBLE array of tag 34736 (may be null/empty).
      */
     public static byte[] write(List<LevelSpec> levels, int crs, int[] customKeys, double[] customDoubles,
                         double scaleX, double originX, double originY) throws java.io.IOException {
+        return write(levels, crs, customKeys, customDoubles, scaleX, originX, originY, false);
+    }
+
+    private static byte[] write(List<LevelSpec> levels, int crs, int[] customKeys, double[] customDoubles,
+                        double scaleX, double originX, double originY, boolean tailLayout)
+            throws java.io.IOException {
         int nl = levels.size();
         int nCustomKeys = customKeys == null ? 0 : customKeys.length;
         int nCustomDbl = customDoubles == null ? 0 : customDoubles.length;
@@ -62,34 +78,52 @@ public final class TestTiffWriter {
             }
         }
 
-        // 2. layout: IFDs right after the header, then external blocks, then tiles
+        // 2. layout: head = IFDs right after the header, then external blocks,
+        // then tiles; tail (header-tail COG) = tiles, then external blocks,
+        // then the IFDs at the very end
         int[] entries = new int[nl];
         for (int i = 0; i < nl; i++) {
             entries[i] = 13 + (i == 0 ? 3 + (nCustomKeys > 0 ? 2 : 0) : 0);
         }
         long[] ifdOff = new long[nl];
-        long pos = 8;
-        for (int i = 0; i < nl; i++) {
-            ifdOff[i] = pos;
-            pos += 2 + 12L * entries[i] + 4;
-        }
+        long[] extOff = new long[nl];
+        long[] tileOff = new long[tiles.size()];
+        long[] tileCnt = new long[tiles.size()];
         int[] firstTile = new int[nl];
         int t0 = 0;
         for (int i = 0; i < nl; i++) {
             firstTile[i] = t0;
             t0 += perLevel[i];
         }
-        long[] extOff = new long[nl];
-        for (int i = 0; i < nl; i++) {
-            extOff[i] = pos;
-            pos += extSize(levels.get(i), perLevel[i]) + (i == 0 ? geoBlockSize(nCustomKeys, nCustomDbl) : 0);
-        }
-        long[] tileOff = new long[tiles.size()];
-        long[] tileCnt = new long[tiles.size()];
-        for (int i = 0; i < tiles.size(); i++) {
-            tileOff[i] = pos;
-            tileCnt[i] = tiles.get(i).length;
-            pos += tiles.get(i).length;
+        long pos = 8;
+        if (tailLayout) {
+            for (int i = 0; i < tiles.size(); i++) {
+                tileOff[i] = pos;
+                tileCnt[i] = tiles.get(i).length;
+                pos += tiles.get(i).length;
+            }
+            for (int i = 0; i < nl; i++) {
+                extOff[i] = pos;
+                pos += extSize(levels.get(i), perLevel[i]) + (i == 0 ? geoBlockSize(nCustomKeys, nCustomDbl) : 0);
+            }
+            for (int i = 0; i < nl; i++) {
+                ifdOff[i] = pos;
+                pos += 2 + 12L * entries[i] + 4;
+            }
+        } else {
+            for (int i = 0; i < nl; i++) {
+                ifdOff[i] = pos;
+                pos += 2 + 12L * entries[i] + 4;
+            }
+            for (int i = 0; i < nl; i++) {
+                extOff[i] = pos;
+                pos += extSize(levels.get(i), perLevel[i]) + (i == 0 ? geoBlockSize(nCustomKeys, nCustomDbl) : 0);
+            }
+            for (int i = 0; i < tiles.size(); i++) {
+                tileOff[i] = pos;
+                tileCnt[i] = tiles.get(i).length;
+                pos += tiles.get(i).length;
+            }
         }
 
         // 3. sequential write (the offsets are already known)
@@ -97,16 +131,30 @@ public final class TestTiffWriter {
         out.write(new byte[]{'I', 'I'});
         out.write(leU16(42));
         out.write(leU32(ifdOff[0]));
-        for (int i = 0; i < nl; i++) {
-            writeIfd(out, levels.get(i), i, ifdOff, extOff[i], perLevel[i], firstTile[i], tileOff, tileCnt,
-                    crs, nCustomKeys, nCustomDbl);
-        }
-        for (int i = 0; i < nl; i++) {
-            writeExt(out, levels.get(i), i, perLevel[i], firstTile[i], extOff[i], tileOff, tileCnt,
-                    scaleX, originX, originY, crs, customKeys, customDoubles);
-        }
-        for (byte[] tile : tiles) {
-            out.write(tile, 0, tile.length);
+        if (tailLayout) {
+            for (byte[] tile : tiles) {
+                out.write(tile, 0, tile.length);
+            }
+            for (int i = 0; i < nl; i++) {
+                writeExt(out, levels.get(i), i, perLevel[i], firstTile[i], extOff[i], tileOff, tileCnt,
+                        scaleX, originX, originY, crs, customKeys, customDoubles);
+            }
+            for (int i = 0; i < nl; i++) {
+                writeIfd(out, levels.get(i), i, ifdOff, extOff[i], perLevel[i], firstTile[i], tileOff, tileCnt,
+                        crs, nCustomKeys, nCustomDbl);
+            }
+        } else {
+            for (int i = 0; i < nl; i++) {
+                writeIfd(out, levels.get(i), i, ifdOff, extOff[i], perLevel[i], firstTile[i], tileOff, tileCnt,
+                        crs, nCustomKeys, nCustomDbl);
+            }
+            for (int i = 0; i < nl; i++) {
+                writeExt(out, levels.get(i), i, perLevel[i], firstTile[i], extOff[i], tileOff, tileCnt,
+                        scaleX, originX, originY, crs, customKeys, customDoubles);
+            }
+            for (byte[] tile : tiles) {
+                out.write(tile, 0, tile.length);
+            }
         }
         return out.toByteArray();
     }

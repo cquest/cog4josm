@@ -41,7 +41,10 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 * Speculative head read: opening an HTTP source issues a single
   `bytes=0-32767` request which proves `Range:` support (no separate probe
   request), reveals size and ETag, and carries the header, IFDs and GeoKeys
-  of a well-laid-out COG in one round-trip.
+  of a well-laid-out COG in one round-trip. A header-tail COG (GDAL's
+  default layout: IFDs at the very end) gets one more speculative request
+  covering the last 32 KiB — two requests per open in every layout, never
+  one per IFD.
 * LRU cache of **metadata only** (header, IFDs, tile offset tables),
   validated by size/ETag and looked up by containment (a bigger cached block
   serves smaller reads): reopening the same COG costs that single head
@@ -68,7 +71,7 @@ JOSM 256px tile ──► CogComposer ──┤  picks the adequate pyramid leve
 
 | Feature | Status |
 |---|---|
-| Byte-range reads, one head read at open (no probe) | ✅ |
+| Byte-range reads, head + tail blocks at open (no probe) | ✅ |
 | Small ranges merged into block requests | ✅ |
 | Speculative tile ring + base overview prefetch | ✅ |
 | Persistent metadata + conditional GET (304 on reopen) | ✅ |

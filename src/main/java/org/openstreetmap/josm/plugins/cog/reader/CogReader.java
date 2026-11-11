@@ -55,6 +55,10 @@ public final class CogReader implements Closeable {
      * parsing the metadata usually costs this single round-trip. It also
      * replaces the old one-byte range probe: the 206 answer reveals the
      * total size and the ETag, a 200 answer proves ranges are unsupported.
+     * Header-tail COGs (GDAL driver default) store those structures at the
+     * very end instead: {@link MetadataCachingSource} then fetches one
+     * speculative tail block of the same size, so the open costs two
+     * requests in every layout.
      */
     static final int HEAD_READ_BYTES = 1 << 15;
 
@@ -95,9 +99,12 @@ public final class CogReader implements Closeable {
                 // whenever it covers the requested ranges
                 cache.store(url, 0, head);
             }
-            // keep the store warm for the next session (no-op without store)
+            CogInfo info = TiffParser.parse(new MetadataCachingSource(http));
+            // keep the store warm for the next session (no-op without store):
+            // done after the parse so the speculative tail block fetched by
+            // MetadataCachingSource (header-tail COGs) is persisted too
             cache.mirrorToStore(url);
-            return new CogReader(http, TiffParser.parse(new MetadataCachingSource(http)));
+            return new CogReader(http, info);
         } catch (IOException | RuntimeException e) {
             http.close();
             throw e;
