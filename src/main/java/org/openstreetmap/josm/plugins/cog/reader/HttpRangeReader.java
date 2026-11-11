@@ -202,7 +202,7 @@ public final class HttpRangeReader implements ByteSource {
         HttpRequest.Builder b = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofSeconds(30))
                 .header("Range", "bytes=" + range)
-                .header("User-Agent", "josm-cog/0.1 (JOSM COG plugin; https://josm.openstreetmap.de)")
+                .header("User-Agent", "cog4josm/0.2.0 (JOSM COG plugin; https://josm.openstreetmap.de)")
                 .GET();
         headers.forEach((k, v) -> {
             if (!"range".equalsIgnoreCase(k)) {
