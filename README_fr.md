@@ -5,7 +5,7 @@
 > Note du vite-codeur :
 > Ce projet a été "vite-codé" pour expérimenter les possibilités d'utilisation en local de Qwen3.8-flash-next couplé à opencode.
 > Il est mis sous licence GPL conformément à sa dépendance à JOSM, mais aurait plus naturellement été mis sous WTFPL.
-> Je ne compte pas le maintenir, mais comme il fonctionne et rend un service réel, je préfère le partager.
+> Je ne compte pas le maintenir, mais comme il fonctionne et peut être utile, je préfère le partager.
 
 
 Plugin JOSM qui affiche des images **COG ([Cloud Optimized GeoTIFF](https://cogeo.org/))** distantes
@@ -28,14 +28,15 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 * Les tuiles d'affichage (grille OSM 256 px) sont **recomposées** à la volée
   à partir des tuiles natives du COG (256/512/1024 px), quel que soit le
   décalage de l'origine géoréférencée.
-* Décodeurs TIFF intégrés : pas (1), Deflate (8/32946), PackBits (32773),
+* Décodeurs TIFF intégrés : aucune (1), Deflate (8/32946), PackBits (32773),
   LZW (5), JPEG (6, via ImageIO). Gris 8/16 bits, RGB(A), predictor horizontal.
 * Requêtes groupées : les petites plages (balises d'un IFD, tuiles voisines
   d'une fenêtre) sont fusionnées en quelques requêtes `Range:` par bloc, sur
   le modèle de l'I/O recouvrant de GDAL — environ 2 à 4 requêtes par tuile
   d'affichage au lieu d'une par tuile source.
 * Remplissage spéculatif : chaque fenêtre de lecture est ourlée d'une
-  rangée supplémentaire de tuiles source (décodées dans le LRU de tuiles,
+  rangée ou colonne supplémentaire de tuiles source (décodées dans le LRU
+  de tuiles,
   sans figurer dans le résultat), et l'aperçu racine est pré-chargé en
   arrière-plan au chargement du calque s'il fait moins de 2 MiB — un
   déplacement vers les tuiles d'affichage voisines ne coûte en général
@@ -63,7 +64,7 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
   persistent dans un petit fichier par URL sous le répertoire de cache du
   plugin, et chaque ouverture se revalide par une requête conditionnelle
   `If-None-Match` — si le fichier n'a pas changé, la réponse est 304 et les
-  métadonnées ne coûtent **aucun octet** transmise (mesuré : la réouverture
+  métadonnées ne coûtent **aucun octet** transmis (mesuré : la réouverture
   passe de 32 KiB à 0 octet pour une requête). Une taille/ETag modifiée
   invalide mémoire et disque avant relecture.
 * Les tuiles d'affichage 256 px composées sont stockées dans **le cache
@@ -104,11 +105,12 @@ JOSM tuile 256px ──► CogComposer ─┤  choisit le niveau de pyramide ad�
 | Ourlet spéculatif de tuiles + préchargement de l'aperçu racine | ✅ |
 | Métadonnées persistées + GET conditionnel (304 à la réouverture) | ✅ |
 | Cache LRU metadata (jamais le raster brut) | ✅ |
+| Tuiles composées dans le cache d'imagerie JOSM (mémoire + disque) | ✅ |
 | Parseur TIFF/GeoTIFF (IFD, sous-IFD, GeoKeys) | ✅ |
 | Conteneur BigTIFF (décalages 64 bits, fichiers PIX4Dmatic) | ✅ |
 | IFD de masque alpha entrelacés (photometrique 4) | détectés, ignorés (composition plus tard) |
 | Pyramide multi-niveaux, choix du meilleur niveau | ✅ |
-| Recomposition de tuiles web-mercatator | ✅ (EPSG:3857/4326) |
+| Recomposition de tuiles web-mercator | ✅ (EPSG:3857/4326) |
 | Couche JOSM fonctionnelle (menu Imagery) | ✅ |
 | Reprojection (UTM, Lambert-93) | ✅ |
 | GeoKeys « custom » (CRS non enregistré, écrits par GDAL) | ✅ |
@@ -132,7 +134,7 @@ ETRS89-LAEA (3035) :
 
 | Modèle (PROJ `+proj=`) | Implémentation |
 |---|---|
-| `longlat` | systématique (ellipsoïde + premier méridien) |
+| `longlat` | géographique (ellipsoïde + premier méridien) |
 | `tmerc` | Transverse de Mercator en interne |
 | `utm` | Transverse de Mercator en interne (forme zone) |
 | `lcc` | Conique conforme de Lambert 1SP/2SP en interne |
@@ -155,7 +157,7 @@ ses paramètres) lorsque ceux-ci correspondent à un modèle connu :
 | 1 | Transverse de Mercator (ellipsoïde et paramètres libres) |
 | 8 | Conique conforme de Lambert 2SP |
 | 9, ou 14 avec parallèles étalons 3078/3079 | Conique conforme de Lambert 1SP |
-| — | Systématique (géographique), ellipsoïde + premier méridien |
+| — | Géodésique (géographique), ellipsoïde + premier méridien |
 
 Un code EPSG non listé ci-dessus mais **accompagné de ses paramètres
 GeoKeys** (cas des exports PIX4Dmatic, qui associent un code non listé à
@@ -208,7 +210,7 @@ src/main/java/org/openstreetmap/josm/plugins/cog/
                                     synthèse des tuiles à la volée, cache JOSM « cog »
 
 src/test/java/…          tests JUnit (fixtures TIFF synthétisées en mémoire)
-test_data/               COG de référence (validation E2E et retours en arrière)
+test_data/               COG de référence (validation E2E et non-régression)
 dist/cog4josm.jar        binaire du plugin construit
 lib/                   josm-tested.jar (compile/test uniquement, jamais embarqué)
 ```
@@ -239,13 +241,13 @@ L'API JOSM compilée est téléchargée par :
 
 ```sh
 ./fetch-josm.sh          # place lib/josm-tested.jar
-./gradlew build          # produit build/libs/cog.jar + lance les tests
+./gradlew build          # produit build/libs/cog4josm.jar + lance les tests
 ```
 
 ## Utiliser
 
-1. Copier `build/libs/cog.jar` dans `~/.josm/plugins/` (ou
-   « Préférences → Parameters → Plugins → Installer à partir d'un fichier local »).
+1. Copier `build/libs/cog4josm.jar` dans `~/.josm/plugins/` (ou
+   « Préférences → Paramètres → Plugins → Installer à partir d'un fichier local »).
 2. Redémarrer JOSM.
 3. Menu **Imagerie → Add remote COG (GeoTIFF) background layer…** et coller
    l'URL d'un COG, par exemple :
@@ -266,7 +268,7 @@ l'emprise, le SRID GeoTIFF, et sait décoder une tuile en PNG.
 
 ## Licence
 
-GPL v2 ou ultérieure (comme JOSM). Le jar du plugin embarque le cœur de
-proj4j (Apache-2.0, utilisé uniquement pour les paramètres GeoKeys — jamais
-une base EPSG) ; son texte de licence est embarqué dans `cog.jar` sous
-`META-INF/LICENSE-proj4j.txt`.
+GPL v2 ou ultérieure (comme JOSM). Le jar du plugin ne contient que le code
+du plugin lui-même — aucune bibliothèque tierce embarquée — le projet est
+donc distribué sous GPL pure ; l'ancienne dépendance proj4j (Apache-2.0) a
+été supprimée en phase 2.4.
